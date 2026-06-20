@@ -2,5 +2,8 @@ templates/
 config/credentials.json
 config/token.json
 config/user_config.json
-config/.env
-token.json
+
+.env
+
+__pycache__/
+*.pyc
