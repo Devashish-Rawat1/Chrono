@@ -32,7 +32,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "tools"))
-from groq_client import call_llm
+from llm_backend import call_llm
 
 
 SYSTEM_PROMPT = """You are the Task Analysis component of an AI scheduling assistant called Chrono.
@@ -78,6 +78,45 @@ Respond ONLY with valid JSON in this exact shape, no other text:
 }
 """
 
+# Strict-mode JSON schema for this agent's response. Mirrors the prompt's
+# shape exactly. Using Groq's strict Structured Outputs here too (not just
+# on the Optimization Agent) is cheap insurance: this agent hasn't hit the
+# "400 Failed to validate JSON" error yet, but it uses the same
+# json_object mode that caused it elsewhere, and there's no reason to
+# wait for it to fail in the field when strict mode is free and available
+# on this model.
+CLASSIFICATION_RESPONSE_SCHEMA = {
+    "name": "chrono_task_classification",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "classifications": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "cognitive_load": {"type": "string", "enum": ["deep", "light"]},
+                        "urgency": {"type": "string", "enum": ["high", "medium", "low"]},
+                        "confidence": {"type": "string", "enum": ["high", "low"]},
+                        "clarifying_question": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "name",
+                        "cognitive_load",
+                        "urgency",
+                        "confidence",
+                        "clarifying_question",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["classifications"],
+        "additionalProperties": False,
+    },
+}
+
 
 def _build_user_prompt(tasks: list[dict]) -> str:
     """Builds a compact, readable task list for the prompt."""
@@ -121,7 +160,7 @@ def analyze_tasks(tasks: list[dict]) -> dict:
     user_prompt = _build_user_prompt(tasks)
 
     try:
-        result = call_llm(SYSTEM_PROMPT, user_prompt, expect_json=True)
+        result = call_llm(SYSTEM_PROMPT, user_prompt, expect_json=True, json_schema=CLASSIFICATION_RESPONSE_SCHEMA)
         raw_classifications = result.get("classifications", [])
         print(f"  [Task Analysis] Groq returned {len(raw_classifications)} classification(s) for {len(tasks)} task(s).")
     except Exception as e:
@@ -205,7 +244,7 @@ def run_clarifications_interactively(analysis: dict) -> dict:
             "Classify this single task as you would normally."
         )
         try:
-            result = call_llm(SYSTEM_PROMPT, clarified_prompt, expect_json=True)
+            result = call_llm(SYSTEM_PROMPT, clarified_prompt, expect_json=True, json_schema=CLASSIFICATION_RESPONSE_SCHEMA)
             classification = result.get("classifications", [{}])[0]
             task["cognitive_load"] = classification.get("cognitive_load", task["cognitive_load"])
             if task.get("urgency") is None:

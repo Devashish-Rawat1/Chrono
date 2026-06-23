@@ -349,6 +349,7 @@ def run_onboarding(answers: dict) -> dict:
         "case": case_info["case"],
         "schedule_window": None,
         "recurring_commitments": None,
+        "focus_span_hours": None,
         "free_slots": case_info.get("free_slots"),
         "tasks": [],
         "needs_followup": [],
@@ -359,6 +360,16 @@ def run_onboarding(answers: dict) -> dict:
         result["recurring_commitments"] = parse_recurring_commitments(
             answers.get("recurring_commitments", "")
         )
+
+    # Focus span is asked in both cases — it's a personal work-style
+    # preference, not something that depends on calendar state. Defaults
+    # to 2 hours if unparseable, a reasonable general assumption, rather
+    # than leaving it None and silently skipping the splitting logic.
+    focus_raw = answers.get("focus_span", "").strip()
+    try:
+        result["focus_span_hours"] = float(focus_raw)
+    except ValueError:
+        result["focus_span_hours"] = 2.0
 
     tasks = parse_tasks(answers.get("tasks", ""))
 
@@ -474,6 +485,12 @@ ONBOARDING_QUESTIONS_CASE_1 = [
         "example": "College: Mon-Fri 9 AM - 3 PM\nGym: Mon/Wed/Fri 6 PM - 7 PM",
     },
     {
+        "key": "focus_span",
+        "question": "How many hours can you focus continuously before needing a break?",
+        "example": "2",
+        "multiline": False,
+    },
+    {
         "key": "tasks",
         "question": "What tasks or goals would you like to schedule this week?",
         "example": "- DSA Practice (2 hrs/day)\n- Build ChronoKai (10 hrs/week)\n- Read ML papers (3 hrs/week)",
@@ -481,6 +498,12 @@ ONBOARDING_QUESTIONS_CASE_1 = [
 ]
 
 ONBOARDING_QUESTIONS_CASE_2 = [
+    {
+        "key": "focus_span",
+        "question": "How many hours can you focus continuously before needing a break?",
+        "example": "2",
+        "multiline": False,
+    },
     {
         "key": "tasks",
         "question": "What tasks or goals would you like me to schedule?",
