@@ -15,8 +15,5 @@ python-dotenv>=1.1.0
 # Multi-agent orchestration (used once agent pipeline is wired together)
 agno==2.6.9
 
-# Local LLM fallback (Qwen3 8B via Ollama) — uncomment once that piece is built
-# ollama>=0.6.0
-
 # Google Sheets output (planner) — uncomment once Output 2 is built
 # gspread>=6.2.0
