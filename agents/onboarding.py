@@ -1,21 +1,13 @@
 """
 Onboarding flow — the entry point of Chrono.
 
-Decides between two paths based on whether the user's real calendar
-already has events:
+Asks the user for their wake/sleep window, recurring weekly commitments,
+continuous-focus span, and tasks for the week, then returns a single
+structured dict that every downstream agent (Task Analysis, Optimization,
+Routine, Replanning) consumes as its starting input.
 
-  Case 1 (empty calendar):  ask wake/sleep window, recurring commitments,
-                             and tasks for the week — 3 questions.
-
-  Case 2 (populated calendar): busy/free is already known from the
-                             Calendar Agent, so we only ask for tasks —
-                             1 question, with an optional vague-task
-                             follow-up.
-
-Returns a single structured dict that every downstream agent
-(Task Analysis, Optimization, Routine, Replanning) consumes as its
-starting input. This module does not call any LLM — it only collects
-and structures input. Classification happens in the Task Analysis Agent.
+This module does not call any LLM — it only collects and structures
+input. Classification happens in the Task Analysis Agent.
 """
 
 import re
@@ -24,27 +16,23 @@ import os
 import datetime
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "tools"))
-from google_calendar import get_events, get_source_calendar_id, find_free_slots
+from google_calendar import get_source_calendar_id
 
 
-# ── Case detection ────────────────────────────────────────────────────────
+# ── Calendar resolution ───────────────────────────────────────────────────
 
 def detect_case(days_ahead: int = 7) -> dict:
     """
-    Checks the user's real (non-Chrono) calendar to decide which
-    onboarding path applies.
+    Resolves which calendar holds the user's real schedule. Kept named
+    detect_case() so existing callers don't break, but Chrono now always
+    runs the same single onboarding flow (ask wake/sleep, commitments,
+    focus span, and tasks) regardless of what's already on the calendar.
 
     Returns:
-        {"case": 1 | 2, "calendar_id": str, "events": list, "free_slots": dict}
+        {"calendar_id": str}
     """
     calendar_id = get_source_calendar_id()
-    events = get_events(days_ahead=days_ahead, calendar_id=calendar_id)
-
-    if len(events) == 0:
-        return {"case": 1, "calendar_id": calendar_id, "events": [], "free_slots": {}}
-
-    free_slots = find_free_slots(days_ahead=days_ahead, calendar_id=calendar_id)
-    return {"case": 2, "calendar_id": calendar_id, "events": events, "free_slots": free_slots}
+    return {"calendar_id": calendar_id}
 
 
 # ── Input parsing helpers ────────────────────────────────────────────────
@@ -330,41 +318,35 @@ def run_onboarding(answers: dict) -> dict:
     Takes raw answers collected from the user (via chat, CLI, or any UI)
     and returns one structured onboarding result for downstream agents.
 
-    Expected keys in `answers`, depending on case:
-      Case 1: "wake_sleep", "recurring_commitments", "tasks"
-      Case 2: "tasks"  (and optionally "task_followups": {task_name: hours})
+    Expected keys in `answers`:
+      "wake_sleep", "recurring_commitments", "focus_span", "tasks"
+      (and optionally "task_followups": {task_name: hours})
 
     Returns:
         {
-          "case": 1 or 2,
-          "schedule_window": {"wake": ..., "sleep": ...} | None,
-          "recurring_commitments": [...] | None,
-          "free_slots": {...} | None,        # only populated for case 2
+          "schedule_window": {"wake": ..., "sleep": ...},
+          "recurring_commitments": [...],
+          "focus_span_hours": float,
           "tasks": [...],
           "needs_followup": [...]            # tasks still missing hours
         }
     """
-    case_info = detect_case()
     result = {
-        "case": case_info["case"],
         "schedule_window": None,
         "recurring_commitments": None,
         "focus_span_hours": None,
-        "free_slots": case_info.get("free_slots"),
         "tasks": [],
         "needs_followup": [],
     }
 
-    if case_info["case"] == 1:
-        result["schedule_window"] = parse_wake_sleep(answers.get("wake_sleep", ""))
-        result["recurring_commitments"] = parse_recurring_commitments(
-            answers.get("recurring_commitments", "")
-        )
+    result["schedule_window"] = parse_wake_sleep(answers.get("wake_sleep", ""))
+    result["recurring_commitments"] = parse_recurring_commitments(
+        answers.get("recurring_commitments", "")
+    )
 
-    # Focus span is asked in both cases — it's a personal work-style
-    # preference, not something that depends on calendar state. Defaults
-    # to 2 hours if unparseable, a reasonable general assumption, rather
-    # than leaving it None and silently skipping the splitting logic.
+    # Focus span defaults to 2 hours if unparseable — a reasonable general
+    # assumption — rather than leaving it None and silently skipping the
+    # task-splitting logic downstream.
     focus_raw = answers.get("focus_span", "").strip()
     try:
         result["focus_span_hours"] = float(focus_raw)
@@ -421,18 +403,16 @@ def _collect_multiline(prompt: str, example: str) -> str:
     return "\n".join(lines)
 
 
-def collect_answers_interactively(case: int) -> dict:
+def collect_answers_interactively() -> dict:
     """
-    Runs the real interactive prompt sequence for the given case and
-    returns the raw answers dict, ready to pass into run_onboarding().
-    Each question declares whether it expects a single line or a list
-    of lines, so the on-screen instructions always match what's
-    actually being asked.
+    Runs the interactive prompt sequence and returns the raw answers
+    dict, ready to pass into run_onboarding(). Each question declares
+    whether it expects a single line or a list of lines, so the on-screen
+    instructions always match what's actually being asked.
     """
     answers = {}
-    questions = ONBOARDING_QUESTIONS_CASE_1 if case == 1 else ONBOARDING_QUESTIONS_CASE_2
 
-    for q in questions:
+    for q in ONBOARDING_QUESTIONS:
         print()
         if q.get("multiline", True):
             answers[q["key"]] = _collect_multiline(q["question"], q["example"])
@@ -472,7 +452,7 @@ def run_followups_interactively(parsed: dict) -> dict:
 
 # ── Question text (for whichever UI calls this — CLI, chat, etc.) ────────
 
-ONBOARDING_QUESTIONS_CASE_1 = [
+ONBOARDING_QUESTIONS = [
     {
         "key": "wake_sleep",
         "question": "What time do you usually wake up and go to sleep?",
@@ -497,32 +477,11 @@ ONBOARDING_QUESTIONS_CASE_1 = [
     },
 ]
 
-ONBOARDING_QUESTIONS_CASE_2 = [
-    {
-        "key": "focus_span",
-        "question": "How many hours can you focus continuously before needing a break?",
-        "example": "2",
-        "multiline": False,
-    },
-    {
-        "key": "tasks",
-        "question": "What tasks or goals would you like me to schedule?",
-        "example": "- DSA Practice (10 hrs/week)\n- Gym (4 times/week)\n- AI Project (15 hrs/week)",
-    },
-]
-
 
 if __name__ == "__main__":
-    info = detect_case()
-    print(f"Detected case: {info['case']}\n")
+    print("Chrono onboarding — let's set up your week.\n")
 
-    if info["case"] == 1:
-        print("Calendar is empty. Running the 3-question setup.")
-    else:
-        print(f"Calendar already has {len(info['events'])} events. Free/busy already known.")
-        print("Just need your tasks for the week.")
-
-    raw_answers = collect_answers_interactively(info["case"])
+    raw_answers = collect_answers_interactively()
     parsed = run_onboarding(raw_answers)
     parsed = run_followups_interactively(parsed)
 
