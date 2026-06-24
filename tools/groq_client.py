@@ -465,6 +465,30 @@ def call_llm(
             time.sleep(wait_seconds)
             continue
 
+        # Transient server-side errors (502/503/504/520/522) come from
+        # Groq's servers or Cloudflare in front of them, not from anything
+        # wrong with our request -- the body is usually a Cloudflare HTML
+        # error page, not JSON. These are typically momentary, so retry a
+        # few times with short backoff, and if they persist, raise a clean
+        # one-line message instead of dumping the whole HTML page into the
+        # caller's logs (which is what happened on the 522 outage).
+        if response.status_code in (500, 502, 503, 504, 520, 521, 522, 524):
+            last_error = requests.HTTPError(
+                f"{response.status_code} server error from Groq (transient — Groq/Cloudflare "
+                "side, not your request). Groq's API may be briefly unavailable; "
+                "try again in a few minutes.",
+                response=response,
+            )
+            if attempt == MAX_RATE_LIMIT_RETRIES:
+                break
+            wait_seconds = min(2 ** attempt, MAX_BACKOFF_SECONDS)
+            print(
+                f"  [Groq] Transient {response.status_code} server error — retrying in "
+                f"{wait_seconds:.1f}s ({attempt + 1}/{MAX_RATE_LIMIT_RETRIES})..."
+            )
+            time.sleep(wait_seconds)
+            continue
+
         if response.status_code >= 400:
             try:
                 error_body = response.json()
