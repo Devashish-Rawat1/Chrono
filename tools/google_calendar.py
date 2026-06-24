@@ -27,6 +27,12 @@ CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "credentials.json")
 TOKEN_PATH = os.path.join(CONFIG_DIR, "token.json")
 USER_CONFIG_PATH = os.path.join(CONFIG_DIR, "user_config.json")
 
+# Monday-first weekday names, indexed to match datetime.date.weekday()
+# (Monday=0 ... Sunday=6). Used to map a block's weekday name back to a
+# real date when writing events. Kept defined here so this module has no
+# dependency on optimization_agent just for a constant.
+_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
 
 def get_calendar_service():
     """Authenticates and returns a Google Calendar API service object."""
@@ -93,6 +99,273 @@ def get_or_create_chrono_calendar(name: str = "Chrono Schedule") -> str:
     new_calendar = {"summary": name, "timeZone": "Asia/Kolkata"}
     created = service.calendars().insert(body=new_calendar).execute()
     return created["id"]
+
+
+# Timezone every Chrono event is written in. Matches the timeZone the
+# Chrono calendar is created with above, so there's never an offset
+# mismatch between the calendar's own zone and the events on it.
+CHRONO_TIMEZONE = "Asia/Kolkata"
+
+# How Chrono-written events are color-coded in Google Calendar, by block
+# "type". These are Google's fixed colorId values (1-11); the exact hues
+# vary by client but the grouping is what matters -- deep work, light
+# work, breaks, meals, and recurring commitments each read distinctly.
+# Google Calendar's event colorId palette is fixed at 1-11:
+#   1 Lavender  2 Sage     3 Grape    4 Flamingo  5 Banana   6 Tangerine
+#   7 Peacock   8 Graphite 9 Blueberry 10 Basil   11 Tomato
+#
+# Fixed-meaning colors (per the user's chosen scheme):
+_WAKE_COLOR_ID = "6"       # Tangerine — start of day
+_SLEEP_COLOR_ID = "9"      # Blueberry — end of day
+_MEAL_COLOR_ID = "5"       # Banana — breakfast / lunch / dinner
+_RECURRING_COLOR_ID = "8"  # Graphite — fixed external commitments
+_BREAK_COLOR_ID = "2"      # Sage — rest gaps
+
+# Colors that scheduled TASKS cycle through, so each distinct task name
+# gets its own color and two different tasks never look alike. These
+# deliberately exclude the fixed-meaning colors above (Banana, Tangerine,
+# Blueberry, Graphite, Sage) so a task is never confused with a meal,
+# wake/sleep marker, commitment, or break.
+_TASK_COLOR_CYCLE = ["7", "11", "4", "3", "1", "10"]  # Peacock, Tomato, Flamingo, Grape, Lavender, Basil
+
+
+def _color_for_block(block: dict, task_color_map: dict) -> str | None:
+    """
+    Picks the colorId for a block. Meals/wake/sleep/recurring/break use
+    their fixed-meaning color; actual task blocks (deep_work / light_work)
+    get a per-TASK-NAME color from task_color_map so each task is visually
+    distinct on the calendar.
+    """
+    btype = block.get("type")
+    if btype == "wake":
+        return _WAKE_COLOR_ID
+    if btype == "sleep":
+        return _SLEEP_COLOR_ID
+    if btype == "meal":
+        return _MEAL_COLOR_ID
+    if btype == "recurring":
+        return _RECURRING_COLOR_ID
+    if btype == "break":
+        return _BREAK_COLOR_ID
+    if btype in ("deep_work", "light_work"):
+        return task_color_map.get(block.get("label"))
+    return None
+
+
+def _build_task_color_map(blocks: list[dict]) -> dict:
+    """
+    Assigns each distinct task name (across deep_work / light_work blocks)
+    a color from _TASK_COLOR_CYCLE, in first-appearance order, wrapping
+    around if there are more tasks than colors. Deterministic: the same
+    set of tasks always maps the same way within a run.
+    """
+    task_color_map = {}
+    next_index = 0
+    for b in blocks:
+        if b.get("type") in ("deep_work", "light_work"):
+            name = b.get("label")
+            if name not in task_color_map:
+                task_color_map[name] = _TASK_COLOR_CYCLE[next_index % len(_TASK_COLOR_CYCLE)]
+                next_index += 1
+    return task_color_map
+
+
+def _weekday_name_to_date(day_name: str, days_ahead: int = 7) -> datetime.date | None:
+    """
+    Maps a weekday name like "Monday" to the actual upcoming date it
+    refers to, using the SAME convention the rest of the pipeline uses:
+    the schedule covers the next `days_ahead` days starting today, and
+    each weekday name appears exactly once in a 7-day window. So
+    "Monday" means "the first Monday on or after today". Returns None if
+    the name doesn't fall within the window (shouldn't happen for a
+    7-day schedule, but guards against bad input).
+    """
+    today = datetime.date.today()
+    for offset in range(days_ahead):
+        date = today + datetime.timedelta(days=offset)
+        if _WEEKDAY_NAMES[date.weekday()] == day_name:
+            return date
+    return None
+
+
+def clear_chrono_calendar(calendar_id: str, days_ahead: int = 7) -> int:
+    """
+    Deletes all events on the Chrono calendar within the schedule window
+    (today through days_ahead days ahead), so a fresh schedule can be
+    written without piling new events on top of an old run's events.
+
+    Only the dedicated Chrono calendar should ever be passed here -- it's
+    safe to wipe because Chrono owns every event on it. This deliberately
+    deletes events rather than deleting+recreating the whole calendar, so
+    the calendar's own settings (color, sharing, subscriptions, its ID)
+    survive across regenerations.
+
+    Returns:
+        The number of events deleted.
+    """
+    service = get_calendar_service()
+
+    local_midnight = datetime.datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).astimezone()
+    time_min = local_midnight.isoformat()
+    time_max = (local_midnight + datetime.timedelta(days=days_ahead)).isoformat()
+
+    deleted = 0
+    page_token = None
+    while True:
+        resp = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for event in resp.get("items", []):
+            service.events().delete(calendarId=calendar_id, eventId=event["id"]).execute()
+            deleted += 1
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    return deleted
+
+
+def write_schedule_to_calendar(
+    blocks: list[dict],
+    days_ahead: int = 7,
+    calendar_name: str = "Chrono Schedule",
+    wake_time: str | None = None,
+    sleep_time: str | None = None,
+) -> dict:
+    """
+    Wipes the dedicated Chrono calendar's events for the schedule window
+    and writes the given blocks as fresh events. This is Output Stage 1
+    of the pipeline -- it turns the in-memory schedule build_schedule()
+    produces into real Google Calendar events.
+
+    Each block dict is expected to have: "day" (weekday name like
+    "Monday"), "start" and "end" ("HH:MM"), "label", and "type". The
+    weekday name is resolved to the actual upcoming date via
+    _weekday_name_to_date(), matching the pipeline's "next days_ahead
+    days from today" convention.
+
+    Args:
+        blocks: the "blocks" list from build_schedule()'s result.
+        days_ahead: the schedule window length, used both for resolving
+                    weekday names to dates and for scoping the wipe.
+        calendar_name: name of the dedicated output calendar.
+        wake_time / sleep_time: optional "HH:MM" strings. When given, a
+                    short "Wake up" event and a short "Sleep" event are
+                    added to EVERY day in the window, so the daily start
+                    and end of the schedule are visible on the calendar
+                    itself. These are written as 15-minute marker events
+                    at the wake and sleep times.
+
+    Returns:
+        {
+          "calendar_id": str,
+          "calendar_link": str,  # URL to open this calendar in the browser
+          "deleted": int,        # events removed in the wipe
+          "created": int,        # events written
+          "skipped": [ ... ],    # any blocks that couldn't be written, with reasons
+        }
+    """
+    service = get_calendar_service()
+    calendar_id = get_or_create_chrono_calendar(calendar_name)
+
+    deleted = clear_chrono_calendar(calendar_id, days_ahead=days_ahead)
+
+    created = 0
+    skipped = []
+
+    # Build the full set of events to write: the schedule blocks, plus
+    # (if wake/sleep were given) a wake-up and sleep marker on every day.
+    events_to_write = list(blocks)
+
+    if wake_time and sleep_time:
+        today = datetime.date.today()
+        for offset in range(days_ahead):
+            day_name = _WEEKDAY_NAMES[(today + datetime.timedelta(days=offset)).weekday()]
+            # 15-minute marker events at the wake and sleep boundaries.
+            wake_end = _add_minutes(wake_time, 15)
+            sleep_end = _add_minutes(sleep_time, 15)
+            events_to_write.append(
+                {"day": day_name, "start": wake_time, "end": wake_end, "label": "Wake up", "type": "wake"}
+            )
+            events_to_write.append(
+                {"day": day_name, "start": sleep_time, "end": sleep_end, "label": "Sleep", "type": "sleep"}
+            )
+
+    # Assign each distinct task its own color up front, from the full set
+    # of blocks, so the mapping is stable no matter the order events are
+    # written in.
+    task_color_map = _build_task_color_map(events_to_write)
+
+    for block in events_to_write:
+        date = _weekday_name_to_date(block.get("day", ""), days_ahead=days_ahead)
+        if date is None:
+            skipped.append({"block": block, "reason": f"could not resolve day '{block.get('day')}' to a date"})
+            continue
+
+        try:
+            start_h, start_m = (int(x) for x in block["start"].split(":"))
+            end_h, end_m = (int(x) for x in block["end"].split(":"))
+        except (KeyError, ValueError, AttributeError):
+            skipped.append({"block": block, "reason": "unparseable start/end time"})
+            continue
+
+        start_dt = datetime.datetime(date.year, date.month, date.day, start_h, start_m)
+        end_dt = datetime.datetime(date.year, date.month, date.day, end_h, end_m)
+
+        event_body = {
+            "summary": block.get("label", "(untitled)"),
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": CHRONO_TIMEZONE},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": CHRONO_TIMEZONE},
+            # Mark Chrono's own events so they can be identified later
+            # (e.g. by a future "only delete Chrono events" wipe) without
+            # relying on the calendar being exclusively Chrono's.
+            "description": f"Chrono-generated · type: {block.get('type', 'unknown')}",
+        }
+        color_id = _color_for_block(block, task_color_map)
+        if color_id:
+            event_body["colorId"] = color_id
+
+        service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        created += 1
+
+    return {
+        "calendar_id": calendar_id,
+        "calendar_link": _calendar_link(calendar_id),
+        "deleted": deleted,
+        "created": created,
+        "skipped": skipped,
+    }
+
+
+def _add_minutes(hhmm: str, minutes: int) -> str:
+    """Adds `minutes` to an 'HH:MM' string, returning 'HH:MM' (clamped so
+    it never rolls past 23:59, since these are same-day marker events)."""
+    h, m = (int(x) for x in hhmm.split(":"))
+    total = min(h * 60 + m + minutes, 23 * 60 + 59)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _calendar_link(calendar_id: str) -> str:
+    """
+    Returns a browser URL that opens this calendar in Google Calendar's
+    web UI. The calendarId is base64-encoded with padding stripped, which
+    is the format Google Calendar's web URLs expect for the `cid`
+    parameter.
+    """
+    import base64
+    encoded = base64.b64encode(calendar_id.encode("utf-8")).decode("utf-8").rstrip("=")
+    return f"https://calendar.google.com/calendar/u/0/r?cid={encoded}"
+
 
 
 def _load_user_config() -> dict:
