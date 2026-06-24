@@ -31,10 +31,12 @@ load_dotenv(dotenv_path=ENV_PATH)
 sys.path.append(os.path.join(os.path.dirname(__file__), "agents"))
 sys.path.append(os.path.join(os.path.dirname(__file__), "tools"))
 
-from onboarding import detect_case, collect_answers_interactively, run_onboarding, run_followups_interactively
+from onboarding import collect_answers_interactively, run_onboarding, run_followups_interactively
 from task_analysis_agent import analyze_tasks, run_clarifications_interactively
 from optimization_agent import build_schedule
 from llm_backend import current_backend
+from google_calendar import write_schedule_to_calendar
+from sheets_planner import fill_planner
 
 
 def _print_schedule(schedule_result: dict) -> None:
@@ -84,16 +86,9 @@ def run() -> dict:
     print("  Chrono — Weekly Planning Setup")
     print(f"  LLM backend: {current_backend()}")
     print("=" * 60)
+    print("\nLet's set up your week.\n")
 
-    info = detect_case()
-    print(f"\nDetected case: {info['case']}")
-
-    if info["case"] == 1:
-        print("Your calendar is empty — running the 3-question setup.\n")
-    else:
-        print(f"Your calendar already has {len(info['events'])} events. Free/busy already known.\n")
-
-    raw_answers = collect_answers_interactively(info["case"])
+    raw_answers = collect_answers_interactively()
     onboarding_result = run_onboarding(raw_answers)
     onboarding_result = run_followups_interactively(onboarding_result)
 
@@ -115,7 +110,132 @@ def run() -> dict:
 
     onboarding_result["schedule"] = schedule_result
 
+    # Output Stage 1: write the schedule to Google Calendar. Only attempt
+    # this when there's a real, valid schedule to write -- a failed build,
+    # a capacity error, or an empty result has nothing to put on the
+    # calendar, and we shouldn't wipe the existing Chrono calendar for it.
+    schedulable = (
+        schedule_result.get("blocks")
+        and not schedule_result.get("failed")
+        and not schedule_result.get("capacity_error")
+    )
+    if schedulable:
+        _maybe_write_to_calendar(schedule_result)
+        _maybe_write_planner(schedule_result)
+
     return onboarding_result
+
+
+# Where the Student Schedule template lives, and where filled planners go.
+_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "config", "Student-Schedule-Template.xlsx")
+_PLANNER_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
+
+
+def _maybe_write_planner(schedule_result: dict) -> None:
+    """
+    Output Stage 2: asks whether to generate the styled weekly planner
+    spreadsheet (a filled copy of the Student Schedule template) the user
+    can download, then writes it to the output/ folder.
+    """
+    print("\n" + "=" * 60)
+    print("  Download weekly planner (Excel)")
+    print("=" * 60)
+
+    if not os.path.exists(_TEMPLATE_PATH):
+        print(
+            f"\nPlanner template not found at {_TEMPLATE_PATH}.\n"
+            "Place the Student Schedule template there (named "
+            "'Student-Schedule-Template.xlsx') to enable the downloadable planner."
+        )
+        return
+
+    answer = input("\nGenerate a downloadable Excel planner of this schedule? (y/n): ").strip().lower()
+    if answer not in ("y", "yes"):
+        print("Skipped — no planner file was created.")
+        return
+
+    output_path = os.path.join(_PLANNER_OUTPUT_DIR, "Chrono-Weekly-Planner.xlsx")
+    try:
+        result = fill_planner(
+            schedule_result["blocks"],
+            template_path=_TEMPLATE_PATH,
+            output_path=output_path,
+            wake_time=schedule_result.get("wake_time"),
+            sleep_time=schedule_result.get("sleep_time"),
+        )
+    except Exception as e:
+        print(f"\nCouldn't generate the planner: {e}")
+        return
+
+    print(f"\nDone. Wrote {result['written']} entries to your planner.")
+    print(f"Saved to: {result['output_path']}")
+    if result["skipped"]:
+        print(f"Note: {len(result['skipped'])} block(s) couldn't be placed:")
+        for s in result["skipped"]:
+            print(f"  - {s['reason']}")
+
+
+def _maybe_write_to_calendar(schedule_result: dict) -> None:
+    """
+    Asks the user whether to publish the schedule to Google Calendar,
+    then (on yes) wipes the dedicated Chrono calendar's events for the
+    week and writes the fresh schedule. Kept as a confirmation step
+    because writing involves DELETING the previous run's events -- a
+    destructive action the user should green-light, not have happen
+    silently on every run.
+    """
+    print("\n" + "=" * 60)
+    print("  Publish to Google Calendar")
+    print("=" * 60)
+    answer = input(
+        "\nWrite this schedule to your 'Chrono Schedule' calendar?\n"
+        "This wipes that calendar's events for the week and replaces them "
+        "with the schedule above. (y/n): "
+    ).strip().lower()
+
+    if answer not in ("y", "yes"):
+        print("Skipped — nothing was written to your calendar.")
+        return
+
+    try:
+        result = write_schedule_to_calendar(
+            schedule_result["blocks"],
+            wake_time=schedule_result.get("wake_time"),
+            sleep_time=schedule_result.get("sleep_time"),
+        )
+    except Exception as e:
+        print(f"\nCouldn't write to Google Calendar: {e}")
+        print(
+            "Your schedule above is still valid — this only affects publishing it. "
+            "Check that config/credentials.json exists and you've authorized access."
+        )
+        return
+
+    print(f"\nDone. Cleared {result['deleted']} old event(s), wrote {result['created']} new one(s).")
+    _print_clickable_link("Open your Chrono calendar", result["calendar_link"])
+    if result["skipped"]:
+        print(f"Note: {len(result['skipped'])} block(s) couldn't be written:")
+        for s in result["skipped"]:
+            print(f"  - {s['reason']}")
+
+
+def _print_clickable_link(label: str, url: str) -> None:
+    """
+    Prints a terminal hyperlink. Terminals that support the OSC 8 escape
+    sequence (most modern ones — Windows Terminal, iTerm2, GNOME Terminal,
+    VS Code's terminal) render `label` as clickable text linking to `url`.
+    For terminals that DON'T support OSC 8 (e.g. older Git Bash / mintty),
+    the escape codes are harmless but invisible-looking, so the raw URL is
+    ALSO printed on its own line underneath -- a bare URL alone on a line,
+    with no surrounding punctuation, is what most terminals auto-detect
+    and make Ctrl/Cmd-clickable. Belt and suspenders so the link is
+    reachable no matter the terminal.
+    """
+    # OSC 8 hyperlink: ESC ] 8 ; ; <url> ESC \  <label>  ESC ] 8 ; ; ESC \
+    esc = "\033"
+    hyperlink = f"{esc}]8;;{url}{esc}\\{label}{esc}]8;;{esc}\\"
+    print(f"\n{hyperlink}")
+    print(url)
 
 
 if __name__ == "__main__":
