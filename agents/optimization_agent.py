@@ -204,7 +204,7 @@ def _parse_days(days_raw: str) -> list[int]:
 
 
 def _default_schedule_window(onboarding_result: dict) -> tuple[str, str]:
-    """Resolves wake/sleep as HH:MM strings, with a sensible Case 2 fallback."""
+    """Resolves wake/sleep as HH:MM strings, with a sensible default if unset."""
     window = onboarding_result.get("schedule_window")
     if window and window.get("wake") and window.get("sleep"):
         wake = _parse_clock(window["wake"])
@@ -864,6 +864,8 @@ def build_schedule(onboarding_result: dict, days_ahead: int = 7, max_days_per_ch
             "validation_problems": [],
             "capacity_error": None,
             "failed": False,
+            "wake_time": full_payload["wake_time"],
+            "sleep_time": full_payload["sleep_time"],
         }
 
     # ---- LLM-driven chunked path (only when LLM_PLACEMENT=1) ----
@@ -931,6 +933,8 @@ def build_schedule(onboarding_result: dict, days_ahead: int = 7, max_days_per_ch
         "validation_problems": [],
         "capacity_error": None,
         "failed": False,
+        "wake_time": full_payload["wake_time"],
+        "sleep_time": full_payload["sleep_time"],
     }
 
 
