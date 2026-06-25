@@ -34,6 +34,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "tools"))
 from onboarding import collect_answers_interactively, run_onboarding, run_followups_interactively
 from task_analysis_agent import analyze_tasks, run_clarifications_interactively
 from optimization_agent import build_schedule
+from explanation_agent import explain_schedule
 from llm_backend import current_backend
 from google_calendar import write_schedule_to_calendar
 from sheets_planner import fill_planner
@@ -110,15 +111,23 @@ def run() -> dict:
 
     onboarding_result["schedule"] = schedule_result
 
-    # Output Stage 1: write the schedule to Google Calendar. Only attempt
-    # this when there's a real, valid schedule to write -- a failed build,
-    # a capacity error, or an empty result has nothing to put on the
-    # calendar, and we shouldn't wipe the existing Chrono calendar for it.
     schedulable = (
         schedule_result.get("blocks")
         and not schedule_result.get("failed")
         and not schedule_result.get("capacity_error")
     )
+
+    # Output Stage 3: a natural-language summary of the week. Shown right
+    # after the schedule so the person reads the plain-English overview
+    # before deciding whether to publish it. Generative task -> a good
+    # use of the LLM; falls back to a plain summary if Groq is down.
+    if schedulable:
+        _print_explanation(schedule_result)
+
+    # Output Stage 1: write the schedule to Google Calendar. Only attempt
+    # this when there's a real, valid schedule to write -- a failed build,
+    # a capacity error, or an empty result has nothing to put on the
+    # calendar, and we shouldn't wipe the existing Chrono calendar for it.
     if schedulable:
         _maybe_write_to_calendar(schedule_result)
         _maybe_write_planner(schedule_result)
@@ -126,28 +135,29 @@ def run() -> dict:
     return onboarding_result
 
 
-# Where the Student Schedule template lives, and where filled planners go.
-_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "config", "Student-Schedule-Template.xlsx")
+def _print_explanation(schedule_result: dict) -> None:
+    """Output Stage 3: print the natural-language 'here's your week' summary."""
+    print("\n" + "=" * 60)
+    print("  Here's your week")
+    print("=" * 60 + "\n")
+    result = explain_schedule(schedule_result)
+    if result["summary"]:
+        print(result["summary"])
+
+
+# Where filled planners are written.
 _PLANNER_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 
 
 def _maybe_write_planner(schedule_result: dict) -> None:
     """
     Output Stage 2: asks whether to generate the styled weekly planner
-    spreadsheet (a filled copy of the Student Schedule template) the user
-    can download, then writes it to the output/ folder.
+    spreadsheet the user can download, then writes it to the output/
+    folder. The planner is built fresh in code (no template file needed).
     """
     print("\n" + "=" * 60)
     print("  Download weekly planner (Excel)")
     print("=" * 60)
-
-    if not os.path.exists(_TEMPLATE_PATH):
-        print(
-            f"\nPlanner template not found at {_TEMPLATE_PATH}.\n"
-            "Place the Student Schedule template there (named "
-            "'Student-Schedule-Template.xlsx') to enable the downloadable planner."
-        )
-        return
 
     answer = input("\nGenerate a downloadable Excel planner of this schedule? (y/n): ").strip().lower()
     if answer not in ("y", "yes"):
@@ -158,7 +168,7 @@ def _maybe_write_planner(schedule_result: dict) -> None:
     try:
         result = fill_planner(
             schedule_result["blocks"],
-            template_path=_TEMPLATE_PATH,
+            template_path="",  # unused — planner is built fresh
             output_path=output_path,
             wake_time=schedule_result.get("wake_time"),
             sleep_time=schedule_result.get("sleep_time"),
