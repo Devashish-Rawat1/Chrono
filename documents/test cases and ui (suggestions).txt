@@ -1,0 +1,322 @@
+ ------------------------------------------ TEST CASES -----------------------------------------------------
+
+ ML Revision (12 hrs/week)
+Gym (4 times/week)
+Project-D (10 hrs/week)
+
+6:00 AM - 10:30 PM
+
+Gym: Mon/Wed/Fri 4 PM - 5 PM
+
+ ML Revision (2 hrs/day)
+ DSA (2 hrs/day)
+
+ML Revision (6 hrs/day)
+DSA (5 hrs/day)
+
+
+https://www.coursera.org/specializations/mlops-machine-learning-duke
+
+Your calendar is empty — running the 3-question setup.
+
+
+  Q: What time do you usually wake up and go to sleep?
+     e.g. 7:00 AM - 11:00 PM
+
+  > 6:00 AM - 10:30 PM
+
+  Q: Do you have any fixed commitments that repeat weekly?
+     e.g. College: Mon-Fri 9 AM - 3 PM
+Gym: Mon/Wed/Fri 6 PM - 7 PM
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > College: Mon-Fri 9 AM - 4 PM
+  > Gym: Mon/Wed/Fri 4 PM -5 PM
+  >
+
+  Q: How many hours can you focus continuously before needing a break?
+     e.g. 2
+
+  > 2
+
+  Q: What tasks or goals would you like to schedule this week?
+     e.g. - DSA Practice (2 hrs/day)
+- Build ChronoKai (10 hrs/week)
+- Read ML papers (3 hrs/week)
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > ML Revision (2 hrs/day)
+  > DSA (2 hrs/day)
+  >
+
+Detected case: 1
+Your calendar is empty — running the 3-question setup.
+
+
+  Q: What time do you usually wake up and go to sleep?
+     e.g. 7:00 AM - 11:00 PM
+
+  > 6:00 AM - 10:30 PM
+
+  Q: Do you have any fixed commitments that repeat weekly?
+     e.g. College: Mon-Fri 9 AM - 3 PM
+Gym: Mon/Wed/Fri 6 PM - 7 PM
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > Gym: Mon/Wed/Fri 4 PM - 5 PM
+  >
+
+  Q: How many hours can you focus continuously before needing a break?
+     e.g. 2
+
+  > 2
+
+  Q: What tasks or goals would you like to schedule this week?
+     e.g. - DSA Practice (2 hrs/day)
+- Build ChronoKai (10 hrs/week)
+- Read ML papers (3 hrs/week)
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > ML Revision (2 hrs/day)
+  > Project Work (3 hrs/day)
+  > Kaggle work (2 hrs/day)
+  >
+
+============================================================
+  Analyzing tasks...
+color - #02bf31
+
+
+(base) PS C:\Users\devas\Desktop\Projects\Chrono> 
+python main.py
+
+============================================================
+  Chrono — Planner Agent
+  LLM backend: groq
+============================================================
+
+Detected case: 1
+Your calendar is empty — running the 3-question setup.
+
+
+  Q: What time do you usually wake up and go to sleep?
+     e.g. 7:00 AM - 11:00 PM
+
+  > 6:00 AM - 10:30 PM
+
+  Q: Do you have any fixed commitments that repeat weekly?
+     e.g. College: Mon-Fri 9 AM - 3 PM
+Gym: Mon/Wed/Fri 6 PM - 7 PM
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > Gym: Mon/Wed/Fri 4 PM - 5 PM
+  >
+
+  Q: How many hours can you focus continuously before needing a break?
+     e.g. 2
+
+  > 2
+
+  Q: What tasks or goals would you like to schedule this week?
+     e.g. - DSA Practice (2 hrs/day)
+- Build ChronoKai (10 hrs/week)
+- Read ML papers (3 hrs/week)
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > ML Revision (2 hrs/day)
+  > Project Work (3 hrs/day)
+  > Kaggle work (2 hrs/day)
+  >
+
+============================================================
+  Analyzing tasks...
+============================================================
+
+  [Groq] Rate limited — waiting 2266.0s before retry 1/3...
+
+ ------------------------------------------ ROBOT FACE EXPRESSIONS -----------------------------------------------------
+
+  ====================
+ =| ---------------  |=
+| | |  ^        ^  | | |
+ =| ---------------  |=
+  ====================
+
+  ====================
+ =| ---------------  |=
+| | |  <>       <> | | |
+ =| ---------------  |=
+  ====================
+
+  ====================
+ =| ---------------  |=
+| | | []        [] | | |
+ =| ---------------  |=
+  ====================
+
+  ====================
+ =| ---------------  |=
+| | |  **      **  | | |
+ =| ---------------  |=
+  ====================
+
+  ====================
+ =| ---------------  |=
+| | |  **********  | | |
+ =| ---------------  |=
+  ====================
+
+ ------------------------------------------ USER INTTERFACE  -----------------------------------------------------
+
+--------------------------------------------------------------------------------------------------------------
+                                Chrono — An Autonomous Planning Agent    
+    
+                                       ===================   
+                                      =| --------------- |=  
+                                     | |     ^    ^      | | 
+                                      =| --------------- |=  
+                                       ===================   
+
+Chrono Building your weekly schedule
+
+  [1/5] Calendar Agent reading events...
+
+  Q: What time do you usually wake up and go to sleep?
+     e.g. 7:00 AM - 11:00 PM
+
+  > 6:00 AM - 10:30 PM
+
+  Q: Do you have any fixed commitments that repeat weekly?
+     e.g. College: Mon-Fri 9 AM - 3 PM
+          Gym: Mon/Wed/Fri 6 PM - 7 PM
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > Gym: Mon/Wed/Fri 4 PM - 5 PM
+  >
+
+  Q: How many hours can you focus continuously before needing a break?
+     e.g. 2
+
+  > 2
+
+  Q: What tasks or goals would you like to schedule this week?
+     e.g. - DSA Practice (2 hrs/day)
+          - Build Chrono (10 hrs/week)
+          - Read ML papers (3 hrs/week)
+     (follow the example format above, one item per line — press Enter on a blank line when done)
+
+  > ML Revision (2 hrs/day)
+  > Project Work (3 hrs/day)
+  > Kaggle work (2 hrs/day)
+  >
+  
+  [1/5] Calendar Agent Done
+
+  [2/5]  Task Analysis Agent classifying cognitive load + urgency...
+
+  [Task Analysis] Groq returned 3 classification(s) for 3 task(s).
+
+  A couple of tasks need clarification before scheduling:
+
+  What type of project is this and what are its deadlines? 
+  e.g. - coding work 
+  
+  > coding work
+   
+  [2/5] Task Analysis Agent Done
+  
+  [3/5] Optimization Agent running deterministic scheduler...
+  
+       [Optimization] 3 schedulable task(s), 24 fixed block(s).
+       [Optimization] Capacity check passed.
+       [Optimization] Schedule placed and validated.
+
+  Monday                                             [Copy] ---> button to copy into clipboard
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    16:00-17:00  Gym  (recurring)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Tuesday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Wednesday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    16:00-17:00  Gym  (recurring)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Thursday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Friday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    16:00-17:00  Gym  (recurring)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Saturday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  Sunday
+    06:30-07:30  Project Work  (deep_work)
+    08:00-09:00  Breakfast  (meal)
+    09:00-11:00  ML Revision  (deep_work)
+    13:00-14:00  Lunch  (meal)
+    14:00-16:00  Project Work  (deep_work)
+    17:00-19:00  Kaggle work  (deep_work)
+    21:00-22:00  Dinner  (meal)
+
+  [3/5] Optimization Agent Done
+  
+  [4/5] Sheet planning
+  
+  Write this schedule to your 'Chrono Schedule' calendar?
+  This wipes that calendar's events for the week and replaces them with the schedule above. (y/n): y
+
+  Open your Chrono calendar - [Google calendar Link]  --> link for google calendar
+ 
+  Download weekly planner (Excel)  [Download]  --> button to download
+    
+  [4/5] Sheet planning Done
+
+  [5/5] Explaination Agent ..
+  
+  Explaination - 
+     ---------------------------------------------------------------------------------
+     ------------------------- EXAPLAINATION -----------------------------------------
+     ---------------------------------------------------------------------------------
+  
+  [5/5] Explaination Agent Done
+  
+----------------------------------------------------------------------------------------------------------
