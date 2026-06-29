@@ -287,40 +287,57 @@ def fill_planner(
 
 def _write_summary(ws, day_stats: dict) -> None:
     """
-    Writes the per-day summary in a compact, readable block at rows 4-5:
-    a 'TASKS' row and a 'FREE TIME' row, each with one column per day
-    aligned under where the grid's day columns will be.
+    Writes the per-day summary in a compact, readable block at rows 4-6:
+    day mini-headers (row 4), a 'TASKS' row (5) and a 'FREE TIME' row (6),
+    each with one column per day aligned under the grid's day columns.
+
+    Styling matches the user's template: grey label cells with bold white
+    text, and light-tinted value cells, all bordered for a clean table.
     """
-    label_font = Font(name=FONT_NAME, size=10, bold=True, color="FF434343")
+    label_font = Font(name=FONT_NAME, size=10, bold=True, color="FFFFFFFF")
     val_font = Font(name=FONT_NAME, size=9, color="FF333333")
+    daycol_font = Font(name=FONT_NAME, size=9, bold=True, color="FF666666")
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    # Fills matching the template: medium grey labels, light value cells.
+    label_fill = PatternFill("solid", start_color="FF7F7F7F", end_color="FF7F7F7F")
+    value_fill = PatternFill("solid", start_color="FFF2F2F2", end_color="FFF2F2F2")
+
     days_present = [d for d in _WEEKDAY_ORDER if d in day_stats]
 
-    # Row 4: day mini-headers above the summary values, so each day's
-    # numbers sit under a labeled column.
-    ws.cell(row=4, column=2, value="").font = label_font
+    # Row 4: day mini-headers above the summary values.
     for day in days_present:
         c = ws.cell(row=4, column=_DAY_TO_COLUMN[day], value=_DAY_ABBR[day])
-        c.font = Font(name=FONT_NAME, size=9, bold=True, color="FF666666")
+        c.font = daycol_font
         c.alignment = center
 
     # Row 5: TASKS — list each task with its (per-day) hours.
-    ws.cell(row=5, column=2, value="TASKS").font = label_font
-    ws.cell(row=5, column=2).alignment = left
-    ws.row_dimensions[5].height = 30
+    lbl5 = ws.cell(row=5, column=2, value="TASKS")
+    lbl5.font = label_font
+    lbl5.alignment = center
+    lbl5.fill = label_fill
+    lbl5.border = _GRID_BORDER
+    ws.row_dimensions[5].height = 34
     for day in days_present:
         tasks = day_stats[day]["tasks"]
         txt = "\n".join(f"{n} {_hours_label(m)}" for n, m in tasks.items()) or "—"
         c = ws.cell(row=5, column=_DAY_TO_COLUMN[day], value=txt)
         c.font = val_font
         c.alignment = center
+        c.fill = value_fill
+        c.border = _GRID_BORDER
 
     # Row 6: FREE TIME — free hours per day.
-    ws.cell(row=6, column=2, value="FREE TIME").font = label_font
-    ws.cell(row=6, column=2).alignment = left
+    lbl6 = ws.cell(row=6, column=2, value="FREE TIME")
+    lbl6.font = label_font
+    lbl6.alignment = center
+    lbl6.fill = label_fill
+    lbl6.border = _GRID_BORDER
+    ws.row_dimensions[6].height = 22
     for day in days_present:
         c = ws.cell(row=6, column=_DAY_TO_COLUMN[day], value=_hours_label(day_stats[day]["free_minutes"]))
         c.font = val_font
         c.alignment = center
+        c.fill = value_fill
+        c.border = _GRID_BORDER
