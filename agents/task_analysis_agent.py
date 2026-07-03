@@ -211,10 +211,17 @@ def analyze_tasks(tasks: list[dict]) -> dict:
 
         task["analysis_confidence"] = match.get("confidence", "high")
 
-        if match.get("confidence") == "low" and match.get("clarifying_question"):
-            needs_clarification.append(
-                {"name": task["name"], "question": match["clarifying_question"]}
+        # Only pester the user for clarification when the model gave us
+        # NO usable classification. If it DID pick deep/light -- even at
+        # "low" confidence -- trust that pick rather than asking a generic
+        # "deep or light?" question for every task, which is what made the
+        # app ask about all three tasks unnecessarily. A missing
+        # cognitive_load is the real signal that we need to ask.
+        if task.get("cognitive_load") not in ("deep", "light"):
+            question = match.get("clarifying_question") or (
+                f"What kind of task is '{task['name']}' — deep focus work or lighter/routine work?"
             )
+            needs_clarification.append({"name": task["name"], "question": question})
 
     return {"tasks": tasks, "needs_clarification": needs_clarification}
 
