@@ -42,6 +42,17 @@ _WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 MINIMUM_INTER_TASK_BREAK_MINUTES = 60
 MINIMUM_SAME_TASK_GAP_MINUTES = 60
 
+# Break required AFTER a fixed block ends, before any work may start, by
+# the block's type. The user wants a short rest to digest after meals and
+# a longer recovery after the gym (or any recurring commitment). These
+# push the start of the free gap that follows the fixed block later by
+# the given amount, so no task begins the instant a meal or the gym ends.
+_POST_BLOCK_BREAK_MINUTES = {
+    "meal": 15,       # 30 min after breakfast / lunch / dinner
+    "recurring": 30,  # 60 min after gym or any recurring commitment
+}
+_DEFAULT_POST_BLOCK_BREAK_MINUTES = 0
+
 
 def _parse_hhmm(value: str) -> int:
     """'HH:MM' -> minutes since midnight."""
@@ -59,20 +70,30 @@ def _free_gaps_for_day(day_name: str, fixed_blocks: list, wake_min: int, sleep_m
     Returns the list of (start_min, end_min) open windows on a day,
     between wake (already including the buffer) and sleep, with every
     fixed block (meals + recurring commitments) on that day carved out.
+
+    Crucially, the free gap that FOLLOWS a fixed block does not begin the
+    instant that block ends -- it begins after the block's required
+    post-break (30 min after a meal, 60 min after the gym / a recurring
+    commitment). This is what guarantees a task never starts immediately
+    after breakfast/lunch/dinner or right after the gym.
     """
+    # Carry each block's type so we know how long a break to add after it.
     busy = []
     for b in fixed_blocks:
         if b["day"] != day_name:
             continue
-        busy.append((_parse_hhmm(b["start"]), _parse_hhmm(b["end"])))
+        busy.append((_parse_hhmm(b["start"]), _parse_hhmm(b["end"]), b.get("type")))
     busy.sort()
 
     gaps = []
     cursor = wake_min
-    for bs, be in busy:
+    for bs, be, btype in busy:
         if bs > cursor:
             gaps.append((cursor, min(bs, sleep_min)))
-        cursor = max(cursor, be)
+        # After this block, the next free time starts only after its
+        # required post-break, so no work butts up against a meal or gym.
+        post_break = _POST_BLOCK_BREAK_MINUTES.get(btype, _DEFAULT_POST_BLOCK_BREAK_MINUTES)
+        cursor = max(cursor, be + post_break)
         if cursor >= sleep_min:
             break
     if cursor < sleep_min:
