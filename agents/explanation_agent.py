@@ -26,14 +26,12 @@ meals, and how much free time each day has.
 
 Write a short, warm, encouraging summary of their week in plain English —
 the kind of thing a thoughtful planning assistant would say when handing
-over a finished schedule. Cover:
-  - the overall shape of the week (how the tasks are distributed),
-  - roughly how deep-focus work is positioned in the day,
-  - how much free time they have and on which days it's tighter,
-  - one or two gentle, practical observations or tips.
+over a finished schedule. Touch on the overall shape of the week, roughly
+how deep-focus work sits in the day, how much free time they have, and one
+gentle practical tip.
 
 Rules:
-  - Keep it to 2-4 short paragraphs. Be concise; do not pad.
+  - Keep it to 1-2 SHORT paragraphs, no more. Be concise; do not pad.
   - Use the real numbers from the digest. Never invent tasks, times, or
     commitments that aren't in the digest.
   - Warm and human, not robotic or salesy. No emojis, no headers, no
@@ -186,21 +184,69 @@ def explain_schedule(schedule_result: dict) -> dict:
         + _format_digest_for_prompt(digest)
     )
 
-    # Provider chain: OpenRouter first (keeps the explanation off Groq's
-    # rate limit), then Groq as a secondary, then a deterministic plain
-    # summary so the run is never left without an explanation.
-    for provider_name, call in (("OpenRouter", _openrouter_call), ("Groq", _groq_call)):
+    # Provider chain. Groq goes FIRST here: it's fast and reliable, and the
+    # explanation is a single tiny call per run so it won't strain Groq's
+    # quota (the earlier OpenRouter-first ordering was to spare that quota,
+    # but one short prose call is negligible). OpenRouter is the fallback,
+    # then a deterministic plain summary so a run is never left without one.
+    #
+    # Each LLM result is validated: some free models (especially reasoning
+    # ones) leak their scratchpad or emit backslash/character spam instead
+    # of prose. If the output looks like that, we reject it and fall through
+    # rather than show the user garbage.
+    for provider_name, call in (("Groq", _groq_call), ("OpenRouter", _openrouter_call)):
         try:
-            text = call(SYSTEM_PROMPT, user_prompt, expect_json=False)
+            # Cap tokens low: a 1-2 paragraph summary needs ~300 tokens,
+            # and a tight cap keeps the call fast and stops any runaway
+            # generation short.
+            text = call(SYSTEM_PROMPT, user_prompt, expect_json=False, max_completion_tokens=300)
             summary = text.strip() if isinstance(text, str) else str(text).strip()
             if not summary:
                 raise ValueError("empty summary")
+            if _looks_like_garbage(summary):
+                raise ValueError("model returned reasoning-leak / malformed output")
             return {"summary": summary, "source": provider_name.lower()}
         except Exception as e:
             print(f"  [Explanation] {provider_name} unavailable ({e}); trying next option.")
 
     print("  [Explanation] Using a plain (non-LLM) summary.")
     return {"summary": _deterministic_summary(digest), "source": "fallback"}
+
+
+def _looks_like_garbage(text: str) -> bool:
+    """
+    Heuristic guard against malformed LLM output for the summary. Catches
+    the failure mode where a free/reasoning model streams its scratchpad
+    ("We need to produce...") or spams escaped characters/backslashes
+    instead of returning clean prose. Returns True if the text should be
+    rejected in favor of the next provider / the deterministic fallback.
+    """
+    t = text.strip()
+    if len(t) < 20:
+        return True
+
+    # Runs of backslashes or repeated escape sequences (the exact failure
+    # you hit: "\ \ \ \ ..." repeated hundreds of times).
+    if "\\ \\ \\" in t or t.count("\\") > 15:
+        return True
+
+    # Reasoning-scratchpad tells: the model talking about the task to
+    # itself rather than to the user.
+    lowered = t.lower()
+    scratch_tells = (
+        "we need to produce", "we need to write", "let me write",
+        "as an ai", "here is the summary:", "sure, here", "must use real numbers",
+        "no invent", "i should", "the user wants",
+    )
+    if any(tell in lowered for tell in scratch_tells):
+        return True
+
+    # Very low ratio of letters to total characters => mostly symbols/spam.
+    letters = sum(ch.isalpha() for ch in t)
+    if letters / max(len(t), 1) < 0.5:
+        return True
+
+    return False
 
 
 if __name__ == "__main__":
