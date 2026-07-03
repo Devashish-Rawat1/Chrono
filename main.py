@@ -173,6 +173,29 @@ def _maybe_write_planner(schedule_result: dict) -> None:
             wake_time=schedule_result.get("wake_time"),
             sleep_time=schedule_result.get("sleep_time"),
         )
+    except PermissionError:
+        # The usual cause: the planner is currently OPEN in Excel, so
+        # Windows won't let us overwrite it. Rather than fail, write to a
+        # timestamped filename so the user always gets their planner.
+        import datetime as _dt
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        alt_path = os.path.join(_PLANNER_OUTPUT_DIR, f"Chrono-Weekly-Planner-{stamp}.xlsx")
+        print(
+            "\nThe planner file looks like it's open in Excel, so it couldn't be "
+            "overwritten.\nSaving to a new file instead (close the old one when you "
+            "get a chance):"
+        )
+        try:
+            result = fill_planner(
+                schedule_result["blocks"],
+                template_path="",
+                output_path=alt_path,
+                wake_time=schedule_result.get("wake_time"),
+                sleep_time=schedule_result.get("sleep_time"),
+            )
+        except Exception as e:
+            print(f"\nCouldn't generate the planner: {e}")
+            return
     except Exception as e:
         print(f"\nCouldn't generate the planner: {e}")
         return
