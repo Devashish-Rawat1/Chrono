@@ -26,7 +26,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "agents"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 
 from dotenv import load_dotenv
-load_dotenv()
+# The project keeps its secrets in config/.env (not the project root), so
+# point python-dotenv there explicitly. Fall back to the default search
+# (cwd / parents) if that file isn't present, so a root .env still works.
+_ENV_PATH = os.path.join(os.path.dirname(__file__), "config", ".env")
+if os.path.exists(_ENV_PATH):
+    load_dotenv(_ENV_PATH)
+else:
+    load_dotenv()
 
 from onboarding import run_onboarding
 from task_analysis_agent import analyze_tasks
@@ -137,14 +144,46 @@ def api_analyze_tasks():
 @_safe
 def api_apply_clarifications(clarifications: dict):
     """
-    Re-runs classification for tasks the user clarified (name -> answer),
-    updating the stored onboarding tasks with the refined classification.
+    Applies the user's clarification answers DIRECTLY (name -> answer).
+
+    The earlier version re-ran the LLM with the answer as a hint, but the
+    LLM would sometimes re-classify from scratch and ignore what the user
+    explicitly said. When a user answers "deep focus" or "light", that's
+    an authoritative instruction -- we set cognitive_load from it and do
+    NOT ask the model again. Free-text answers that aren't clearly deep or
+    light are interpreted with a simple keyword check; anything still
+    ambiguous defaults to "deep" (the safer choice for scheduling, since
+    deep work gets the protected morning slots).
     """
     onboarding = _SESSION.get("onboarding")
     if not onboarding:
         raise RuntimeError("No onboarding in progress.")
-    # Attach the clarification text so analyze_tasks can use it, then
-    # re-analyze just those tasks.
+
+    def interpret(answer: str) -> str:
+        a = (answer or "").strip().lower()
+        light_words = ("light", "routine", "easy", "casual", "chill", "relax", "low")
+        deep_words = ("deep", "focus", "hard", "intense", "heavy", "concentrat")
+        if any(w in a for w in light_words) and not any(w in a for w in deep_words):
+            return "light"
+        return "deep"
+
+    for task in onboarding["tasks"]:
+        if task["name"] in clarifications:
+            task["cognitive_load"] = interpret(clarifications[task["name"]])
+            # Once the user has told us, it's settled -- clear any flag
+            # that would make it look unclassified downstream.
+            task["confidence"] = "high"
+            task.pop("clarification", None)
+    return {"ok": True}
+
+
+@eel.expose
+@_safe
+def _api_apply_clarifications_via_llm(clarifications: dict):
+    """(Kept for reference — the old LLM-re-run path, no longer used.)"""
+    onboarding = _SESSION.get("onboarding")
+    if not onboarding:
+        raise RuntimeError("No onboarding in progress.")
     for task in onboarding["tasks"]:
         if task["name"] in clarifications:
             task["clarification"] = clarifications[task["name"]]
@@ -235,7 +274,29 @@ def api_write_planner():
             schedule["blocks"], template_path="", output_path=output_path,
             wake_time=schedule.get("wake_time"), sleep_time=schedule.get("sleep_time"),
         )
+    _SESSION["last_planner_path"] = output_path
     return {"written": result.get("written", 0), "path": output_path}
+
+
+@eel.expose
+@_safe
+def api_get_planner_download():
+    """
+    Reads the most recently generated planner file and returns it as
+    base64 plus its filename, so the frontend can offer a real download
+    (rather than just printing the on-disk path). Called when the user
+    clicks the download button in the terminal.
+    """
+    import base64
+    path = _SESSION.get("last_planner_path")
+    if not path or not os.path.exists(path):
+        raise RuntimeError("No planner file available to download.")
+    with open(path, "rb") as f:
+        data = f.read()
+    return {
+        "filename": os.path.basename(path),
+        "b64": base64.b64encode(data).decode("ascii"),
+    }
 
 
 def main():
