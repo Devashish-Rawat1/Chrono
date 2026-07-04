@@ -38,7 +38,7 @@ def detect_case(days_ahead: int = 7) -> dict:
 # ── Input parsing helpers ────────────────────────────────────────────────
 
 _TIME_RANGE_RE = re.compile(
-    r"(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)"
+    r"(\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?)"
 )
 
 
@@ -51,6 +51,63 @@ def parse_wake_sleep(raw: str) -> dict:
     if match:
         return {"wake": match.group(1).strip(), "sleep": match.group(2).strip(), "raw": raw}
     return {"wake": None, "sleep": None, "raw": raw}
+
+
+# Used when the user leaves the meals question blank -- the previous
+# hardcoded defaults, so behaviour is unchanged for anyone who skips it.
+_DEFAULT_MEALS_FALLBACK = [
+    {"name": "Breakfast", "start": "8:00 AM", "end": "9:00 AM", "raw": "default"},
+    {"name": "Lunch", "start": "1:00 PM", "end": "2:00 PM", "raw": "default"},
+    {"name": "Dinner", "start": "9:00 PM", "end": "10:00 PM", "raw": "default"},
+]
+
+
+def parse_meals(raw: str) -> list[dict]:
+    """
+    Parses the user's meal times into structured meal blocks. Accepts one
+    meal per line, in the form:
+
+        Breakfast (8:00 AM - 9:00 AM)
+        Lunch (1:00 PM - 2:00 PM)
+        Dinner (9:00 PM - 10:00 PM)
+
+    The name can be anything (Brunch, Snack, Pre-workout, ...) and the
+    parentheses are optional -- "Lunch 1:00 PM - 2:00 PM" also works. The
+    user may list ANY number of meals (2, 3, 4, ...); each valid line
+    becomes one fixed meal block. Lines without a parseable time range are
+    skipped (so a stray note doesn't create a broken meal).
+
+    Returns a list of {"name", "start", "end", "raw"} dicts in the order
+    given. An empty/blank answer returns [] -- the caller decides what
+    default to use in that case.
+    """
+    meals = []
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        time_match = _TIME_RANGE_RE.search(line)
+        if not time_match:
+            # No time range on this line -> can't place it; skip it.
+            continue
+
+        # The meal name is whatever precedes the time range, with any
+        # opening parenthesis and surrounding punctuation trimmed off.
+        name_part = line[: time_match.start()].strip()
+        name_part = name_part.rstrip("(").strip(" :-–(").strip()
+        if not name_part:
+            name_part = f"Meal {len(meals) + 1}"
+
+        meals.append(
+            {
+                "name": name_part,
+                "start": time_match.group(1).strip(),
+                "end": time_match.group(2).strip(),
+                "raw": line,
+            }
+        )
+    return meals
 
 
 def parse_recurring_commitments(raw: str) -> list[dict]:
@@ -334,6 +391,7 @@ def run_onboarding(answers: dict) -> dict:
     result = {
         "schedule_window": None,
         "recurring_commitments": None,
+        "meals": None,
         "focus_span_hours": None,
         "tasks": [],
         "needs_followup": [],
@@ -343,6 +401,12 @@ def run_onboarding(answers: dict) -> dict:
     result["recurring_commitments"] = parse_recurring_commitments(
         answers.get("recurring_commitments", "")
     )
+
+    # Meals: the user supplies any number (2-4 typically) with their own
+    # times. If they leave it blank, fall back to sensible defaults so the
+    # scheduler always has meal anchors to work around.
+    meals = parse_meals(answers.get("meals", ""))
+    result["meals"] = meals if meals else _DEFAULT_MEALS_FALLBACK
 
     # Focus span defaults to 2 hours if unparseable — a reasonable general
     # assumption — rather than leaving it None and silently skipping the
@@ -366,7 +430,97 @@ def run_onboarding(answers: dict) -> dict:
     result["tasks"] = tasks
     result["needs_followup"] = needs_followup(tasks)
 
+    # Validate the parsed inputs and collect any problems in plain English
+    # so the UI can tell the user exactly what to fix, instead of silently
+    # proceeding with garbage (e.g. an unparseable wake/sleep window, or a
+    # meal whose times didn't parse).
+    result["input_errors"] = _validate_onboarding(result, answers)
+
     return result
+
+
+def _validate_onboarding(result: dict, answers: dict) -> list[str]:
+    """
+    Checks the parsed onboarding for input that couldn't be understood and
+    returns a list of human-readable problems. An empty list means the
+    inputs are usable. This is what lets Chrono say "I couldn't read your
+    wake/sleep time" instead of scheduling against null.
+    """
+    problems = []
+
+    # Wake/sleep window must have parsed to real times.
+    win = result.get("schedule_window") or {}
+    if not win.get("wake") or not win.get("sleep"):
+        raw = (answers.get("wake_sleep") or "").strip()
+        problems.append(
+            f"I couldn't read your wake/sleep time from \"{raw}\". "
+            "Please use a format like \"7:00 AM - 11:00 PM\"."
+        )
+    else:
+        # Both parsed -- sanity check the ordering and each end.
+        w = _clock_minutes(win["wake"])
+        s = _clock_minutes(win["sleep"])
+        if w is None or s is None:
+            problems.append('Your wake/sleep time looks off — try "7:00 AM - 11:00 PM".')
+        elif s <= w:
+            problems.append(
+                f"Your sleep time ({win['sleep']}) isn't after your wake time "
+                f"({win['wake']}). Please check the order."
+            )
+
+    # Meals: if the user typed something but NONE of it parsed, that's an
+    # error worth surfacing (rather than silently using defaults). If they
+    # left it blank, defaults apply and that's fine.
+    raw_meals = (answers.get("meals") or "").strip()
+    parsed_meals = result.get("meals") or []
+    is_default = parsed_meals and parsed_meals[0].get("raw") == "default"
+    if raw_meals and (is_default or not parsed_meals):
+        problems.append(
+            "I couldn't read any of your meal times. Use a format like "
+            "\"Lunch (1:00 PM - 2:00 PM)\", one per line."
+        )
+    else:
+        # Flag meals with a nonsensical duration (e.g. "12:00 AM - 1:00 PM"
+        # = 13 hours, usually a typo for 12:00 PM) or that sit outside the
+        # waking window.
+        for m in parsed_meals:
+            if m.get("raw") == "default":
+                continue
+            ms = _clock_minutes(m["start"])
+            me = _clock_minutes(m["end"])
+            if ms is None or me is None:
+                problems.append(f"I couldn't read the time for \"{m['name']}\".")
+                continue
+            dur = me - ms
+            if dur <= 0:
+                problems.append(
+                    f"\"{m['name']}\" ({m['start']} - {m['end']}) doesn't end after it "
+                    "starts — check for an AM/PM mix-up."
+                )
+            elif dur > 180:
+                problems.append(
+                    f"\"{m['name']}\" ({m['start']} - {m['end']}) is over 3 hours long — "
+                    "did you mean a different AM/PM? (e.g. 12:00 PM, not 12:00 AM)."
+                )
+
+    return problems
+
+
+def _clock_minutes(raw: str):
+    """Parses a clock string to minutes-since-midnight, or None. Handles
+    12/24-hour and mixed-case AM/PM like the scheduler does."""
+    raw = (raw or "").strip()
+    m = re.match(r"^(\d{1,2}(?::\d{2})?)\s*([AaPp][Mm])?$", raw)
+    if m:
+        num, ampm = m.group(1), m.group(2)
+        raw = f"{num} {ampm.upper()}" if ampm else num
+    for fmt in ("%I:%M %p", "%I %p", "%H:%M", "%I:%M%p", "%I%p"):
+        try:
+            t = datetime.datetime.strptime(raw, fmt).time()
+            return t.hour * 60 + t.minute
+        except ValueError:
+            continue
+    return None
 
 
 # ── Interactive CLI collection ──────────────────────────────────────────
