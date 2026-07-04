@@ -93,6 +93,7 @@ def api_process_onboarding(answers: dict):
         "tasks": [t["name"] for t in onboarding.get("tasks", [])],
         "window": onboarding.get("schedule_window"),
         "needs_followup": onboarding.get("needs_followup", []),
+        "input_errors": onboarding.get("input_errors", []),
     }
 
 
