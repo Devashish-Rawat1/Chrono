@@ -1,0 +1,237 @@
+TEST -1 
+chrono
+Chrono — An Autonomous Planning Agent
+chrono
+Let's set up your week.
+[Q]
+What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)
+>
+6:00 AM - 10:30 PM
+[Q]
+What are your meal times? One per line, blank line when done.
+    e.g. Breakfast (8:00 AM - 9:00 AM)
+         Lunch (1:00 PM - 2:00 PM)
+         Dinner (9:00 PM - 10:00 PM)
+    (list as many as you like — 2, 3, 4… or leave blank for defaults)
+>
+Lunch(1:00 PM - 2:00PM)
+>
+Dinner (10:00 PM - 10:30 Pm)
+>
+[Q]
+Any fixed weekly commitments? One per line, blank line when done.
+    e.g. Gym: Mon/Wed/Fri 4 PM - 5 PM
+>
+Gym: Mon/Wed/Fri 4 PM - 5 PM
+>
+[Q]
+How many hours can you focus continuously before a break?  (e.g. 2)
+>
+2
+[Q]
+What tasks/goals to schedule this week? One per line, blank line when done.
+    e.g. DSA Practice (2 hrs/day)   |   Build Chrono (10 hrs/week)
+>
+ML Revision (2 hrs/day)
+>
+Project Work (3 hrs/day)
+>
+[1/5]
+Onboarding — structuring your inputs...
+[1/5]
+Onboarding done — 2 task(s), window 6:00 AM to 10:30 PM.
+[2/5]
+Task Analysis — classifying cognitive load + urgency...
+[2/5]
+Groq classified 2 task(s).
+[3/5]
+Optimization — running deterministic scheduler...
+[3/5]
+Schedule placed and validated.
+Monday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  4:00 PM – 5:00 PM   Gym            (recurring)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Tuesday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Wednesday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  4:00 PM – 5:00 PM   Gym            (recurring)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Thursday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Friday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  4:00 PM – 5:00 PM   Gym            (recurring)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Saturday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+Sunday
+  6:30 AM – 8:30 AM   ML Revision    (deep_work)
+  9:30 AM – 11:30 AM   Project Work   (deep_work)
+  12:30 PM – 1:30 PM   Project Work   (deep_work)
+  10:00 PM – 10:30 AM   Dinner         (meal)
+[ Copy schedule ]
+[4/5]
+Explanation — summarizing your week...
+[4/5]
+Here's your week:
+You've got a consistent routine ahead of you, with a waking window from 06:00 to 22:30 each day. Your weekdays and weekends are balanced with 2 hours of ML Revision and 3 hours of Project Work, leaving you with a significant amount of free time - between 22 and 23 hours each day. With gym commitments on Monday, Wednesday, and Friday, you'll want to make sure to schedule your deep-focus work around those times, perhaps using the morning for intense work and the afternoon for more flexible tasks. 
+Given the large blocks of free time, a practical tip might be to use some of that time to review and adjust your schedule as the week unfolds, making sure you're on track with your goals and making the most of your time.
+[5/5]
+Publish this schedule to your Google Calendar? (y/n)
+>
+n
+[cal]
+Skipped — nothing written to your calendar.
+[5/5]
+Generate a downloadable Excel planner? (y/n)
+>
+n
+[xlsx]
+Skipped — no planner file created.
+chrono
+All done. Reload to plan another week.
+
+---------------------------------------------------------------------------------------------------------------------
+TEST - 2
+
+chrono
+Chrono — An Autonomous Planning Agent
+chrono
+Let's set up your week.
+[Q]
+What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)
+>
+basjbcxakjs
+[Q]
+Any fixed weekly commitments? One per line, blank line when done.
+    e.g. Gym: Mon/Wed/Fri 4 PM - 5 PM
+>
+cjhvasjhc
+>
+[Q]
+How many hours can you focus continuously before a break?  (e.g. 2)
+>
+cjkasbckajs
+[Q]
+What tasks/goals to schedule this week? One per line, blank line when done.
+    e.g. DSA Practice (2 hrs/day)   |   Build Chrono (10 hrs/week)
+>
+chvascjkasb
+>
+c
+>
+[1/5]
+Onboarding — structuring your inputs...
+[1/5]
+Onboarding done — 2 task(s), window null to null.
+[2/5]
+Task Analysis — classifying cognitive load + urgency...
+[2/5]
+Groq classified 2 task(s).
+[3/5]
+Optimization — running deterministic scheduler...
+[3/5]
+Schedule placed and validated.
+Monday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Tuesday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Wednesday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Thursday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Friday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Saturday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+Sunday
+  8:00 AM – 9:00 AM   Breakfast      (meal)
+  1:00 PM – 2:00 PM   Lunch          (meal)
+  9:00 PM – 10:00 PM   Dinner         (meal)
+
+------------------------------------------------------
+TEST - 3
+chrono
+Chrono — An Autonomous Planning Agent
+chrono
+Let's set up your week.
+[Q]
+What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)
+>
+6:00 AM - 10:30 PM
+[Q]
+What are your meal times? One per line, blank line when done.
+    e.g. Breakfast (8:00 AM - 9:00 AM)
+         Lunch (1:00 PM - 2:00 PM)
+         Dinner (9:00 PM - 10:00 PM)
+    (list as many as you like — 2, 3, 4… or leave blank for defaults)
+>
+Lunch (12:00 AM - 1:00 PM)
+>
+Dinner (10:00 PM - 10:30 PM)
+>
+[Q]
+Any fixed weekly commitments? One per line, blank line when done.
+    e.g. Gym: Mon/Wed/Fri 4 PM - 5 PM
+>
+Gym: Mon/Wed/Fri 4 PM - 5 PM
+>
+[Q]
+How many hours can you focus continuously before a break?  (e.g. 2)
+>
+2
+[Q]
+What tasks/goals to schedule this week? One per line, blank line when done.
+    e.g. DSA Practice (2 hrs/day)   |   Build Chrono (10 hrs/week)
+>
+ML Revision (2 hrs/day)
+>
+Project Work (3 hrs/day)
+>
+[1/5]
+Onboarding — structuring your inputs...
+[1/5]
+Onboarding done — 2 task(s), window 6:00 AM to 10:30 PM.
+[2/5]
+Task Analysis — classifying cognitive load + urgency...
+[2/5]
+Groq classified 2 task(s).
+[3/5]
+Optimization — running deterministic scheduler...
+[3/5]
+Could not fit everything once breaks are placed.
+Not possible to schedule all tasks on Monday: they need 5.0 hours, but only 1.5 hours are available after meals and commitments.
+  • Extend your wake/sleep window by about 3.5 hour(s) (e.g. wake earlier or sleep later) to fit everything on Monday.
+  • Alternate tasks across days instead of doing all of them daily — e.g. ML Revision on odd days, Project Work on even days.
+  • Reduce total daily task time by about 3.5 hour(s) (shorten a task's daily duration, or move it to a 'per week' total instead of 'per day').
+chrono
+Adjust your inputs and reload to try again.
