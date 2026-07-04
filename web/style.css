@@ -354,3 +354,27 @@ html, body {
   94% { opacity: 0.5; }
   96% { opacity: 1; }
 }
+
+/* Reload button: small, top-right corner of the terminal panel. */
+#reload-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--chrono-green);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+#reload-btn:hover {
+  opacity: 1;
+  border-color: var(--chrono-green);
+  background: rgba(2,232,60,0.08);
+}

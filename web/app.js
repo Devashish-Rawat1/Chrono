@@ -419,6 +419,18 @@ function stopAllVoice() {
   render();
 })();
 
+/* ---- reload button: restart the session (no boot gate) ---- */
+(function initReloadButton() {
+  const btn = document.getElementById('reload-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    // Restart the flow directly rather than reloading the page, so we go
+    // straight back to the first question instead of the boot gate (audio
+    // is already unlocked from the initial boot).
+    startSession();
+  });
+})();
+
 /* ---- hover easter eggs ----
    Hovering the "Drazan" badge -> Chrono says "He is my master."
    Hovering the GitHub / LinkedIn icons -> "That's my master's profile."
@@ -538,14 +550,25 @@ cmdEl().addEventListener('keydown', (e) => {
   }
 });
 
-/* Ask one question, echo the answer back into the log, return the text. */
+/* A pending ask()'s rejecter, so startSession() can cancel a question the
+   previous run was waiting on. */
+let _inputRejecter = null;
+
+/* Ask one question, echo the answer back into the log, return the text.
+   Rejects with an 'aborted' error if the session is restarted while
+   waiting, so the stale run unwinds instead of hanging. */
 function ask() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     cmdEl().disabled = false;
     cmdEl().focus();
     _inputResolver = (val) => {
+      _inputRejecter = null;
       addLineInstant('>', 'dim', val, 'user');
       resolve(val);
+    };
+    _inputRejecter = () => {
+      _inputResolver = null;
+      reject(new Error('__session_aborted__'));
     };
   });
 }
@@ -590,19 +613,25 @@ async function call(fn, ...args) {
 }
 
 /* ---- the session flow ---- */
-async function runSession() {
+async function runSession(sessionId) {
+  // If a newer session has started (Reload), this stale run should stop.
+  const alive = () => sessionId === undefined || sessionId === _sessionId;
+
   cmdEl().disabled = true;
   setFace(IDLE_FACE);
 
   // Beat of silence after boot, then the "Chrono is online" greeting.
   await wait(2000);
+  if (!alive()) return;
   const online = say('online');
   // Give the greeting a moment before Chrono starts typing, so the voice
   // and the typing sound don't collide (voice first, then typing).
   await wait(1400);
+  if (!alive()) return;
 
   let backend = 'groq';
   try { backend = await call('api_backend_name'); } catch (e) {}
+  if (!alive()) return;
 
   await typeLine('chrono', 'dim', 'Chrono — An Autonomous Planning Agent', 'muted');
   await typeLine('chrono', 'dim', `Let's set up your week.`, 'muted');
@@ -611,6 +640,13 @@ async function runSession() {
   // ---- Onboarding questions ----
   await typeLine('[Q]', '', 'What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)', 'muted');
   const wake_sleep = await ask();
+
+  await typeLine('[Q]', '', 'What are your meal times? One per line, blank line when done.', 'muted');
+  await typeLine(null, null, '    e.g. Breakfast (8:00 AM - 9:00 AM)', 'muted', { speed: 4 });
+  await typeLine(null, null, '         Lunch (1:00 PM - 2:00 PM)', 'muted', { speed: 4 });
+  await typeLine(null, null, '         Dinner (9:00 PM - 10:00 PM)', 'muted', { speed: 4 });
+  await typeLine(null, null, '    (list as many as you like — 2, 3, 4… or leave blank for defaults)', 'muted', { speed: 3 });
+  const meals = await askMultiline();
 
   await typeLine('[Q]', '', 'Any fixed weekly commitments? One per line, blank line when done.', 'muted');
   await typeLine(null, null, '    e.g. Gym: Mon/Wed/Fri 4 PM - 5 PM', 'muted', { speed: 4 });
@@ -628,6 +664,7 @@ async function runSession() {
 
   const answers = {
     wake_sleep,
+    meals,
     recurring_commitments: recurring,
     focus_span: focus,
     tasks,
@@ -638,7 +675,21 @@ async function runSession() {
   await typeLine('[1/5]', '', 'Onboarding — structuring your inputs...', 'muted');
   const onb = await call('api_process_onboarding', answers);
   stopThinking();
-  await typeLine('[1/5]', '', `Onboarding done — ${onb.tasks.length} task(s), window ${onb.window.wake} to ${onb.window.sleep}.`, 'success');
+
+  // If any inputs couldn't be understood, tell the user exactly what to
+  // fix and stop -- rather than silently scheduling against bad data.
+  if (onb.input_errors && onb.input_errors.length) {
+    await typeLine('[1/5]', '', 'Some of your inputs need a second look:', 'error');
+    for (const err of onb.input_errors) {
+      await typeLine(null, null, '  • ' + err, 'muted', { speed: 4 });
+    }
+    say('error');
+    await typeLine('chrono', 'dim', 'Fix the above and hit ⟳ Reload to start over.', 'muted');
+    return;
+  }
+
+  const win = onb.window || {};
+  await typeLine('[1/5]', '', `Onboarding done — ${onb.tasks.length} task(s), window ${win.wake} to ${win.sleep}.`, 'success');
 
   // ---- Stage 2: task analysis (+ clarifications) ----
   startThinking();
@@ -882,6 +933,41 @@ function showStartGate() {
   });
 }
 
+/* A monotonically increasing session id. Each start bumps it; a running
+   session checks that its id is still current and bails if a newer one
+   has started (e.g. the user hit Reload mid-flow). This prevents two
+   concurrent sessions fighting over the input line and log. */
+let _sessionId = 0;
+function currentSession() { return _sessionId; }
+
+/* Start (or restart) the session flow WITHOUT the boot gate. Clears the
+   log, cancels any pending input from a previous run, and runs. Used both
+   after the initial gate and by the Reload button. */
+function startSession() {
+  _sessionId += 1;
+  const mySession = _sessionId;
+
+  // Abandon any input the old run was waiting on (reject its pending
+  // ask()), and reset UI state.
+  if (_inputRejecter) { try { _inputRejecter(); } catch (e) {} }
+  _inputResolver = null;
+  _inputRejecter = null;
+  try { stopAllVoice(); } catch (e) {}
+  try { stopThinking(); } catch (e) {}
+  logEl().innerHTML = '';
+  cmdEl().value = '';
+  cmdEl().disabled = true;
+
+  runSession(mySession).catch(err => {
+    // The intentional abort of a superseded run is not a real error.
+    if (err && String(err.message).includes('__session_aborted__')) return;
+    if (mySession !== _sessionId) return;  // stale run erroring out; ignore
+    stopThinking();
+    addLineInstant('[fatal]', '', String(err && err.message || err), 'error');
+    addLineInstant(null, null, 'Right-click → Inspect → Console for the full trace.', 'muted');
+  });
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   // Show a face right away so the window is never blank while connecting.
   try { setFace(IDLE_FACE); } catch (e) {}
@@ -896,12 +982,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   logEl().innerHTML = '';
 
-  // Gate on a click so audio is unlocked, THEN run the session.
+  // Gate on a click so audio is unlocked (once), THEN run the session.
   await showStartGate();
-
-  runSession().catch(err => {
-    stopThinking();
-    addLineInstant('[fatal]', '', String(err && err.message || err), 'error');
-    addLineInstant(null, null, 'Right-click → Inspect → Console for the full trace.', 'muted');
-  });
-});
+  startSession();
+});git 
