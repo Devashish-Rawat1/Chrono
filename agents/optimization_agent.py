@@ -166,7 +166,14 @@ will be merged in separately. Only return the blocks YOU are placing: tasks and 
 
 def _parse_clock(raw: str) -> datetime.time | None:
     raw = raw.strip()
-    for fmt in ("%I:%M %p", "%I %p", "%H:%M"):
+    # Normalize: uppercase the AM/PM, and ensure a space before it so
+    # "2:00PM", "2:00pm", "10:30 Pm" all parse the same way.
+    import re as _re
+    m = _re.match(r"^(\d{1,2}(?::\d{2})?)\s*([AaPp][Mm])?$", raw)
+    if m:
+        num, ampm = m.group(1), m.group(2)
+        raw = f"{num} {ampm.upper()}" if ampm else num
+    for fmt in ("%I:%M %p", "%I %p", "%H:%M", "%I:%M%p", "%I%p"):
         try:
             return datetime.datetime.strptime(raw, fmt).time()
         except ValueError:
@@ -258,13 +265,22 @@ def _compact_prompt_payload(payload: dict) -> dict:
     """
     recurring_only = [b for b in payload["fixed_blocks"] if b["type"] == "recurring"]
 
+    # Meals repeat identically every day, so describe them once (as a
+    # pattern) from the actual meal blocks in the payload -- deduplicated
+    # by label -- rather than a hardcoded list. This keeps the prompt in
+    # sync with the user's real meal times.
+    seen_meals = {}
+    for b in payload["fixed_blocks"]:
+        if b["type"] == "meal" and b["label"] not in seen_meals:
+            seen_meals[b["label"]] = {"label": b["label"], "start": b["start"], "end": b["end"]}
+
     return {
         "wake_time": payload["wake_time"],
         "sleep_time": payload["sleep_time"],
         "wake_buffer_minutes": payload["wake_buffer_minutes"],
         "focus_span_hours": payload["focus_span_hours"],
         "days_ahead": payload["days_ahead"],
-        "daily_meals_every_day": [{"label": m["name"], "start": m["start"], "end": m["end"]} for m in DEFAULT_MEALS],
+        "daily_meals_every_day": list(seen_meals.values()),
         "recurring_commitments": recurring_only,
         "tasks": payload["tasks"],
     }
@@ -290,12 +306,26 @@ def _build_constraint_payload(onboarding_result: dict, day_offsets: list[int]) -
     recurring_blocks = _build_recurring_blocks(onboarding_result, day_offsets)
 
     fixed_blocks = list(recurring_blocks)
+    # Meals now come from onboarding (the user's own meal times, any
+    # number of them). Fall back to the module default only if somehow
+    # absent, so older callers still work.
+    user_meals = onboarding_result.get("meals") or DEFAULT_MEALS
     for offset in day_offsets:
         day_name = _WEEKDAY_NAMES[(datetime.date.today() + datetime.timedelta(days=offset)).weekday()]
         recurring_today = [b for b in recurring_blocks if b["day"] == day_name]
-        for meal in DEFAULT_MEALS:
-            meal_start = _time_to_minutes(_parse_clock(meal["start"]))
-            meal_end = _time_to_minutes(_parse_clock(meal["end"]))
+        for meal in user_meals:
+            start_t = _parse_clock(meal["start"])
+            end_t = _parse_clock(meal["end"])
+            if start_t is None or end_t is None:
+                # Unparseable meal time -> skip it rather than crash.
+                continue
+            meal_start = _time_to_minutes(start_t)
+            meal_end = _time_to_minutes(end_t)
+            # Normalize to 24-hour "HH:MM" so every downstream stage (the
+            # deterministic placer, the planner, the calendar) sees a
+            # consistent format regardless of how the user typed the time.
+            start_hhmm = f"{start_t.hour:02d}:{start_t.minute:02d}"
+            end_hhmm = f"{end_t.hour:02d}:{end_t.minute:02d}"
             # If a recurring commitment (e.g. College 9 AM-4 PM) already
             # covers this meal's slot, drop the meal rather than placing
             # an overlapping block. The user eats around the commitment;
@@ -312,7 +342,7 @@ def _build_constraint_payload(onboarding_result: dict, day_offsets: list[int]) -
             )
             if overlaps_commitment:
                 continue
-            fixed_blocks.append({"day": day_name, "start": meal["start"], "end": meal["end"], "label": meal["name"], "type": "meal"})
+            fixed_blocks.append({"day": day_name, "start": start_hhmm, "end": end_hhmm, "label": meal["name"], "type": "meal"})
 
     tasks_payload = []
     for t in onboarding_result.get("tasks", []):
