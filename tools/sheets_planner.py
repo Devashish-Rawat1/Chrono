@@ -92,6 +92,30 @@ def _add_minutes(hhmm: str, minutes: int) -> str:
     return _minutes_to_hhmm(total)
 
 
+def _fmt_12h(hhmm: str, with_period: bool = True) -> str:
+    """'13:00' -> '1:00 PM' (or '1:00' if with_period=False)."""
+    h, m = (int(x) for x in hhmm.split(":"))
+    period = "AM" if h < 12 else "PM"
+    hh = h % 12 or 12
+    base = f"{hh}:{m:02d}"
+    return f"{base} {period}" if with_period else base
+
+
+def _time_range_label(start: str, end: str) -> str:
+    """
+    Formats a block's time span like the calendar shows it, e.g.
+    '6:30 – 8:00 AM'. The period (AM/PM) is only shown once at the end
+    when both ends share it, to keep the cell compact; if they differ
+    (e.g. crossing noon) each end carries its own period.
+    """
+    sh = int(start.split(":")[0])
+    eh = int(end.split(":")[0])
+    same_period = (sh < 12) == (eh < 12)
+    if same_period:
+        return f"{_fmt_12h(start, with_period=False)} – {_fmt_12h(end, with_period=True)}"
+    return f"{_fmt_12h(start)} – {_fmt_12h(end)}"
+
+
 def _hours_label(minutes: int) -> str:
     hours = minutes / 60
     return f"{int(hours)}h" if hours == int(hours) else f"{hours:.1f}h"
@@ -232,7 +256,7 @@ def fill_planner(
             events.append({"day": day, "start": sleep_time, "end": _add_minutes(sleep_time, INTERVAL_MINUTES), "label": "Sleep", "type": "sleep"})
 
     task_fill_map = _build_task_fill_map(events)
-    block_font = Font(name=FONT_NAME, size=9, color="FF1A1A1A")
+    block_font = Font(name=FONT_NAME, size=8, color="FF1A1A1A")
 
     written, skipped = 0, 0
     skipped_detail = []
@@ -266,7 +290,12 @@ def fill_planner(
         if end_row > start_row:
             ws.merge_cells(f"{col_letter}{start_row}:{col_letter}{end_row}")
 
-        cell = ws.cell(row=start_row, column=col, value=block.get("label", ""))
+        # Cell text: task name on top, its time range beneath, mirroring
+        # how Google Calendar shows "ML Revision / 6:30 – 8:00 AM". The
+        # smaller (8pt) font keeps both lines readable inside the cell.
+        label = block.get("label", "")
+        cell_text = f"{label}\n{_time_range_label(block['start'], block['end'])}"
+        cell = ws.cell(row=start_row, column=col, value=cell_text)
         cell.font = block_font
         cell.alignment = _CENTER
         cell.border = _GRID_BORDER
