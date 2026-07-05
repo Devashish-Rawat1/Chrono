@@ -3,7 +3,10 @@ config/credentials.json
 config/token.json
 config/user_config.json
 
-.env
+config/.env
 
 __pycache__/
 *.pyc
+
+output/
+.DS_Store
