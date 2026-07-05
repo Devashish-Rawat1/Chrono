@@ -57,14 +57,35 @@ _SESSIONS: dict[str, dict] = {}
 _COOKIE = "chrono_sid"
 
 
+def _is_secure_request(request: Request) -> bool:
+    """
+    True if this request arrived over https. On Render/Railway the app sits
+    behind a TLS-terminating proxy, so the socket scheme is http but the
+    ORIGINAL scheme is in X-Forwarded-Proto. We check both so the Secure
+    cookie flag is set in production (https) but NOT on local http testing
+    (where a Secure cookie would be silently dropped and break sessions).
+    """
+    if request.url.scheme == "https":
+        return True
+    return request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+
+
 def _session_for(request: Request, response: Response) -> dict:
     """Gets (or creates) the per-visitor session, tracked by a cookie."""
     sid = request.cookies.get(_COOKIE)
     if not sid or sid not in _SESSIONS:
         sid = uuid.uuid4().hex
         _SESSIONS[sid] = {}
-        # httponly cookie; SameSite=Lax is fine for same-origin fetch.
-        response.set_cookie(_COOKIE, sid, httponly=True, samesite="lax", max_age=60 * 60 * 6)
+        # httponly cookie; SameSite=Lax is fine for same-origin fetch and
+        # survives the top-level redirect back from Google. Secure is set
+        # only on https (prod) so local http testing still works.
+        response.set_cookie(
+            _COOKIE, sid,
+            httponly=True,
+            samesite="lax",
+            secure=_is_secure_request(request),
+            max_age=60 * 60 * 6,
+        )
     return _SESSIONS[sid]
 
 
@@ -289,8 +310,9 @@ def auth_google_login(request: Request, response: Response):
     import web_google_auth as gauth
     sess = _session_for(request, response)
     try:
-        auth_url, state = gauth.build_auth_url()
+        auth_url, state, verifier = gauth.build_auth_url()
         sess["oauth_state"] = state
+        sess["oauth_code_verifier"] = verifier  # needed at exchange time
         r = RedirectResponse(auth_url)
         for k, v in response.headers.items():
             if k.lower() == "set-cookie":
@@ -313,7 +335,8 @@ async def auth_google_callback(request: Request, response: Response):
     if not code:
         return HTMLResponse("<p>No authorization code returned. You can close this tab.</p>")
     try:
-        sess["google_token"] = gauth.exchange_code(code)
+        verifier = sess.get("oauth_code_verifier")
+        sess["google_token"] = gauth.exchange_code(code, code_verifier=verifier)
     except Exception as e:
         return HTMLResponse(f"<p>Sign-in failed: {e}</p>")
     # Back to the app; the frontend re-checks status and continues.
