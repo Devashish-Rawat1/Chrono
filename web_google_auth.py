@@ -24,10 +24,22 @@ Configuration comes from environment variables (never committed):
 
 import os
 import json
+import secrets
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+
+
+def _make_code_verifier() -> str:
+    """
+    Generates a PKCE code_verifier: a high-entropy URL-safe string, 43-128
+    chars per RFC 7636. token_urlsafe(64) yields ~86 chars, well within
+    range. We create it ourselves (rather than letting the Flow autogen it)
+    so the SAME verifier can be reused across the two separate Flow objects
+    in build_auth_url() and exchange_code().
+    """
+    return secrets.token_urlsafe(64)
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -65,28 +77,43 @@ def is_configured() -> bool:
     )
 
 
-def build_auth_url() -> tuple[str, str]:
+def build_auth_url() -> tuple[str, str, str]:
     """
-    Returns (authorization_url, state). Redirect the user to the URL;
-    keep the state to verify the callback.
+    Returns (authorization_url, state, code_verifier).
+
+    We generate the PKCE code_verifier OURSELVES and hand it back so the
+    caller can stash it in the session. This is essential because the
+    callback builds a DIFFERENT Flow object to exchange the code, and that
+    second Flow has no memory of the verifier the first one made. Passing
+    our own verifier into both the auth URL and the token exchange makes
+    them match; without it, Google rejects the exchange with
+    "invalid_grant: Missing code verifier".
     """
+    verifier = _make_code_verifier()
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES)
     flow.redirect_uri = os.environ["GOOGLE_REDIRECT_URI"]
+    flow.code_verifier = verifier  # force this exact verifier
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
-    return auth_url, state
+    return auth_url, state, verifier
 
 
-def exchange_code(code: str) -> dict:
+def exchange_code(code: str, code_verifier: str | None = None) -> dict:
     """
     Exchanges the callback `code` for credentials, returned as a JSON-able
     dict we can stash in the session (and later rebuild into Credentials).
+
+    code_verifier MUST be the same value returned by build_auth_url() for
+    this login and carried through the session, or the exchange fails with
+    "Missing code verifier".
     """
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES)
     flow.redirect_uri = os.environ["GOOGLE_REDIRECT_URI"]
+    if code_verifier:
+        flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     return json.loads(creds.to_json())
