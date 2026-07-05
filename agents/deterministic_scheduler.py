@@ -48,8 +48,8 @@ MINIMUM_SAME_TASK_GAP_MINUTES = 60
 # push the start of the free gap that follows the fixed block later by
 # the given amount, so no task begins the instant a meal or the gym ends.
 _POST_BLOCK_BREAK_MINUTES = {
-    "meal": 15,       # 30 min after breakfast / lunch / dinner
-    "recurring": 30,  # 60 min after gym or any recurring commitment
+    "meal": 30,       # 30 min after breakfast / lunch / dinner
+    "recurring": 60,  # 60 min after gym or any recurring commitment
 }
 _DEFAULT_POST_BLOCK_BREAK_MINUTES = 0
 
