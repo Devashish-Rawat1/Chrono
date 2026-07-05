@@ -30,6 +30,12 @@ html, body {
   display: block;
 }
 
+/* Hidden on first paint so the terminal ("Chrono is online") never flashes
+   for a frame before the boot gate covers it. The JS adds `booted` to
+   <body> once both gates are dismissed and the session actually starts. */
+#term-root { visibility: hidden; }
+body.booted #term-root { visibility: visible; }
+
 #term-root {
   position: relative;
   z-index: 1;
@@ -246,7 +252,8 @@ html, body {
 }
 @keyframes gatefadein { from { opacity: 0; } to { opacity: 1; } }
 
-#start-gate .gate-inner {
+#start-gate .gate-inner,
+#signin-gate .gate-inner {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -378,3 +385,82 @@ html, body {
   border-color: var(--chrono-green);
   background: rgba(2,232,60,0.08);
 }
+
+/* Sign-in screen: same overlay style as the boot gate. */
+#signin-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(2,20,8,0.85) 0%, rgba(5,6,5,0.97) 70%);
+  backdrop-filter: blur(2px);
+  animation: gatefadein 0.5s ease;
+}
+.signin-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  width: 100%;            /* span the gate-inner column so children center
+                             on the same axis as the logo and title */
+}
+.signin-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0a0c0a;
+  border: 1px solid var(--chrono-green);
+  color: var(--chrono-green);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  padding: 12px 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(2,232,60,0.5);
+  box-shadow: 0 0 18px rgba(2,232,60,0.2);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.signin-btn:hover {
+  background: rgba(2,232,60,0.1);
+  box-shadow: 0 0 26px rgba(2,232,60,0.4);
+}
+.signin-btn .g-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: var(--chrono-green);
+  color: #0a0c0a;
+  border-radius: 50%;
+  font-weight: bold;
+  font-size: 14px;
+}
+.signin-skip {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.15s, color 0.15s;
+}
+.signin-skip:hover { opacity: 1; color: var(--chrono-green); }
+.signin-note {
+  max-width: 420px;
+  margin: 8px auto 0;      /* auto side margins keep it centered under the
+                              logo/title regardless of parent nesting */
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+.signin-note b { color: var(--chrono-green); }
