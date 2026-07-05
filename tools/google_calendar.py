@@ -17,9 +17,19 @@ from googleapiclient.discovery import build
 # "Chrono Schedule" calendar and write events to it) + Tasks (read-only).
 # All scripts sharing token.json must request the exact same scopes, or
 # re-auth will be triggered every time you switch between them.
+#
+# Chrono needs to read the user's existing calendars (to schedule around
+# their commitments) and create/manage events on its own "Chrono
+# Schedule" calendar -- both covered by the calendar scope. This is a
+# SENSITIVE scope (verification required past 100 users) but NOT a
+# restricted one, so no CASA security assessment is needed.
+#
+# Note: the previously-requested Tasks scope was removed -- nothing in the
+# app calls the Tasks API, and requesting an unused scope is a red flag
+# during Google's OAuth verification (reviewers cross-check declared
+# scopes against actual usage). Request only what you use.
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/tasks.readonly",
 ]
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "config")
@@ -34,8 +44,32 @@ USER_CONFIG_PATH = os.path.join(CONFIG_DIR, "user_config.json")
 _WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
+# Optional override: when set (by the hosted web server), get_calendar_service()
+# returns THIS service instead of doing the desktop token-file auth. This lets
+# the web server inject a per-session, per-user Calendar service built from that
+# visitor's OAuth token, without changing every function that needs a service.
+_SERVICE_OVERRIDE = None
+
+
+def set_service_override(service) -> None:
+    """Web server calls this with a per-session service before writing."""
+    global _SERVICE_OVERRIDE
+    _SERVICE_OVERRIDE = service
+
+
+def clear_service_override() -> None:
+    global _SERVICE_OVERRIDE
+    _SERVICE_OVERRIDE = None
+
+
 def get_calendar_service():
-    """Authenticates and returns a Google Calendar API service object."""
+    """Authenticates and returns a Google Calendar API service object.
+
+    If a service override has been set (hosted web mode), that is returned
+    directly -- the caller has already authenticated this visitor."""
+    if _SERVICE_OVERRIDE is not None:
+        return _SERVICE_OVERRIDE
+
     creds = None
 
     # Reuse saved token if it exists
