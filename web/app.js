@@ -235,12 +235,27 @@ const VOICE = {
   error:         'assets/error.mp3',
   mute:          'assets/mute.mp3',
   unmute:        'assets/unmute.mp3',
+  reloaded:      'assets/reloaded.mp3',                  // Reload button
   // Hover easter eggs.
   master:        'assets/he-is-my-master.mp3',          // hover the Drazan badge
   mastersProfile:'assets/thats-my-masters-profile.mp3', // hover GitHub / LinkedIn
 };
 
 let voiceMuted = false;
+
+/* Attach a one-line console error if an audio file fails to load (e.g. a
+   404 because the filename/path is wrong or the clip is missing from
+   assets/). Without this, a bad audio URL fails SILENTLY -- .play()
+   rejects with nothing useful -- which makes a missing clip look like a
+   mysterious "sound just doesn't work" bug. With it, the console names the
+   exact file so you can see which one is 404ing. */
+function _logAudioErrors(audio, src) {
+  if (!audio) return audio;
+  audio.addEventListener('error', () => {
+    console.error(`[audio] failed to load: ${src} (check it exists in web/assets/ with this exact name)`);
+  });
+  return audio;
+}
 
 /* ---- typing sound ----
    ONE reusable audio element that we start when a line begins typing and
@@ -254,6 +269,7 @@ let _typingActive = false;
 function _ensureTypingAudio() {
   if (!_typingAudio) {
     _typingAudio = new Audio(TYPING_SOUND);
+    _logAudioErrors(_typingAudio, TYPING_SOUND);
     _typingAudio.volume = 0.5;
     _typingAudio.loop = true;  // keep looping while a line types
   }
@@ -324,6 +340,7 @@ async function say(key) {
   try {
     if (_currentVoice) { try { _currentVoice.pause(); } catch (e) {} }
     const a = new Audio(src);
+    _logAudioErrors(a, src);
     a.volume = 0.9;
     _currentVoice = a;
     a.play().catch(() => {});
@@ -428,6 +445,21 @@ function stopAllVoice() {
     // straight back to the first question instead of the boot gate (audio
     // is already unlocked from the initial boot).
     startSession();
+    // Play the "reloaded" cue AFTER startSession (which calls
+    // stopAllVoice + resets the session). We play it directly rather than
+    // via say(), because say() waits for typing-idle and would be cut off
+    // by the fresh run; this fires the confirmation immediately. Respects
+    // mute like any other voice.
+    if (!voiceMuted) {
+      try {
+        if (_currentVoice) { try { _currentVoice.pause(); } catch (e) {} }
+        const a = new Audio(VOICE.reloaded);
+        a.volume = 0.9;
+        _currentVoice = a;
+        a.play().catch(() => {});
+        _bindViz(a);
+      } catch (e) {}
+    }
   });
 })();
 
@@ -554,6 +586,12 @@ cmdEl().addEventListener('keydown', (e) => {
    previous run was waiting on. */
 let _inputRejecter = null;
 
+/* Monotonic run token. startSession() bumps it; a superseded run detects a
+   newer value and bails (see alive() in runSession). Must exist before the
+   first startSession() call, or that call throws
+   "ReferenceError: _sessionId is not defined" and boot dies. */
+let _sessionId = 0;
+
 /* Ask one question, echo the answer back into the log, return the text.
    Rejects with an 'aborted' error if the session is restarted while
    waiting, so the stale run unwinds instead of hanging. */
@@ -586,29 +624,82 @@ async function askMultiline() {
 
 /* ---- backend bridge helper ---- */
 
-/* Wait until eel has loaded and connected. eel.js defines window.eel and
-   attaches the exposed functions once the websocket is up; calling too
-   early throws "eel is not defined" or "eel.api_x is not a function". */
+/* Detect which backend we're talking to:
+   - Eel (local desktop app): window.eel is present.
+   - HTTP (hosted web app): no eel, so we call FastAPI /api/* endpoints.
+   This lets ONE frontend work both ways with no other changes. */
+function isEelMode() {
+  return typeof window.eel !== 'undefined' && typeof window.eel.api_backend_name === 'function';
+}
+
+/* Wait until a backend is reachable, detecting Eel (desktop) vs HTTP (web).
+   - If eel.js loaded, window.eel appears quickly -> Eel mode.
+   - Otherwise we're a hosted web app: confirm the HTTP API responds.
+   The __noEel flag (set by index.html when /eel.js 404s) lets us skip the
+   Eel wait entirely in web mode. */
 async function waitForEel(timeoutMs = 8000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (typeof window.eel !== 'undefined' && typeof window.eel.api_backend_name === 'function') {
-      return true;
+  // If eel.js explicitly failed to load, we're in web mode -- go straight
+  // to the HTTP check, no need to wait for an eel object that won't come.
+  if (!window.__noEel) {
+    const start = Date.now();
+    while (Date.now() - start < 1500) {
+      if (isEelMode()) return true;
+      if (window.__noEel) break;  // eel.js 404'd while we were waiting
+      await wait(100);
     }
-    await wait(100);
+    if (isEelMode()) return true;
+  }
+
+  // Web mode: confirm the HTTP API is reachable. Retry a couple of times
+  // in case the first request races page load.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch('/api/backend_name', { credentials: 'same-origin' });
+      if (r.ok) return true;
+    } catch (e) { /* retry */ }
+    await wait(400);
   }
   return false;
 }
 
+/* Maps the logical backend function name to its HTTP route + how its
+   argument is wrapped in the POST body. GET endpoints take no body. */
+const _HTTP_ROUTES = {
+  api_backend_name:        { method: 'GET',  path: '/api/backend_name' },
+  api_process_onboarding:  { method: 'POST', path: '/api/process_onboarding',  arg: 'answers' },
+  api_apply_followups:     { method: 'POST', path: '/api/apply_followups',     arg: 'followups' },
+  api_analyze_tasks:       { method: 'POST', path: '/api/analyze_tasks' },
+  api_apply_clarifications:{ method: 'POST', path: '/api/apply_clarifications', arg: 'clarifications' },
+  api_build_schedule:      { method: 'POST', path: '/api/build_schedule' },
+  api_explain_schedule:    { method: 'POST', path: '/api/explain_schedule' },
+  api_write_calendar:      { method: 'POST', path: '/api/write_calendar' },
+  api_write_planner:       { method: 'POST', path: '/api/write_planner' },
+};
+
 async function call(fn, ...args) {
-  if (typeof window.eel === 'undefined' || typeof window.eel[fn] !== 'function') {
-    throw new Error(`backend not connected (eel.${fn} unavailable)`);
+  // ---- Eel (desktop) path ----
+  if (isEelMode()) {
+    if (typeof window.eel[fn] !== 'function') {
+      throw new Error(`backend not connected (eel.${fn} unavailable)`);
+    }
+    const res = await window.eel[fn](...args)();
+    if (!res || res.ok === false) throw new Error((res && res.error) || 'unknown backend error');
+    return res.data;
   }
-  // eel exposes async wrappers returning our {ok, data|error} envelope.
-  const res = await window.eel[fn](...args)();
-  if (!res || res.ok === false) {
-    throw new Error((res && res.error) || 'unknown backend error');
+
+  // ---- HTTP (web) path ----
+  const route = _HTTP_ROUTES[fn];
+  if (!route) throw new Error(`no HTTP route for ${fn}`);
+  const opts = { method: route.method, credentials: 'same-origin' };
+  if (route.method === 'POST') {
+    opts.headers = { 'Content-Type': 'application/json' };
+    // Wrap the first arg under its expected key (e.g. {answers:{...}}).
+    const body = route.arg ? { [route.arg]: args[0] } : {};
+    opts.body = JSON.stringify(body);
   }
+  const resp = await fetch(route.path, opts);
+  const res = await resp.json();
+  if (!res || res.ok === false) throw new Error((res && res.error) || 'unknown backend error');
   return res.data;
 }
 
@@ -767,15 +858,23 @@ async function runSession(sessionId) {
       const cal = await call('api_write_calendar');
       stopScan();
       stopThinking();
-      await typeLine('[cal]', '', `Cleared ${cal.deleted} old event(s), wrote ${cal.created} new one(s).`, 'success');
-      say('timelineSync');
-      if (cal.calendar_link) addLinkChip('Open your Chrono calendar', cal.calendar_link);
+      // Web mode safety net: if the visitor skipped sign-in earlier (or
+      // their Google session expired), the server returns needs_auth.
+      if (cal && cal.needs_auth) {
+        await typeLine('[cal]', '', 'Google isn\'t connected — reconnect to publish to your calendar.', 'muted');
+        addActionChip('Sign in with Google', () => { window.location.href = cal.auth_url; });
+        await typeLine(null, null, 'Or skip — your planner and on-screen schedule are ready regardless.', 'muted', { speed: 3 });
+      } else {
+        await typeLine('[cal]', '', `Cleared ${cal.deleted} old event(s), wrote ${cal.created} new one(s).`, 'success');
+        say('timelineSync');
+        if (cal.calendar_link) addLinkChip('Open your Chrono calendar', cal.calendar_link);
+      }
     } catch (e) {
       stopScan();
       stopThinking();
       await typeLine('[cal]', '', 'Calendar unavailable: ' + e.message, 'error');
       say('error');
-      await typeLine(null, null, 'If your Google login expired, delete config/token.json and reload.', 'muted');
+      await typeLine(null, null, 'On desktop: if your Google login expired, delete config/token.json and reload.', 'muted');
     }
   } else {
     await typeLine('[cal]', '', 'Skipped — nothing written to your calendar.', 'muted');
@@ -860,19 +959,39 @@ function addLinkChip(label, url) {
   _scroll();
 }
 
-/* A download chip: on click, asks the backend for the planner file as
-   base64, then triggers a real browser download so the user gets the
-   .xlsx without hunting for it on disk. */
+/* A clickable action chip that runs a callback (e.g. "Sign in with Google"). */
+function addActionChip(label, onClick) {
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.textContent = '[ ' + label + ' ]';
+  chip.onclick = onClick;
+  logEl().appendChild(chip);
+  _scroll();
+}
+
+/* A download chip. In Eel (desktop) mode it fetches the file as base64
+   and saves it; in web mode it just points a link at the download
+   endpoint (the server streams the .xlsx). */
 function addDownloadChip(label) {
   const chip = document.createElement('span');
   chip.className = 'chip';
   chip.textContent = '[ ' + label + ' ]';
   chip.onclick = async () => {
     const original = chip.textContent;
+
+    // Web mode: simplest reliable path is to navigate to the endpoint,
+    // which responds with a file download.
+    if (!isEelMode()) {
+      window.location.href = '/api/download_planner';
+      chip.textContent = '[ Downloaded ✓ ]';
+      setTimeout(() => { chip.textContent = original; }, 1800);
+      return;
+    }
+
+    // Eel mode: fetch base64 and build the download in-page.
     chip.textContent = '[ Preparing download... ]';
     try {
       const dl = await call('api_get_planner_download');
-      // Rebuild the binary from base64 and save it via a temporary link.
       const bytes = Uint8Array.from(atob(dl.b64), c => c.charCodeAt(0));
       const blob = new Blob([bytes], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -917,8 +1036,12 @@ function showStartGate() {
         <div class="gate-cta">▶ CLICK ANYWHERE TO BOOT</div>
       </div>`;
     document.body.appendChild(gate);
+
     const begin = () => {
       // Prime the typing audio within the user gesture so later plays work.
+      // Playing (then pausing) one element inside a real click gesture
+      // unlocks the audio channel for the whole page, so the voice clips
+      // that follow ("Chrono is online", etc.) play without being blocked.
       try {
         const a = _ensureTypingAudio();
         a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
@@ -933,17 +1056,76 @@ function showStartGate() {
   });
 }
 
-/* A monotonically increasing session id. Each start bumps it; a running
-   session checks that its id is still current and bails if a newer one
-   has started (e.g. the user hit Reload mid-flow). This prevents two
-   concurrent sessions fighting over the input line and log. */
-let _sessionId = 0;
-function currentSession() { return _sessionId; }
+/* Sign-in screen, shown after the boot gate and before the session. In
+   web mode it checks whether Google is connected: if not, it offers
+   "Sign in with Google" (and "Continue without calendar"). Once connected
+   -- or if the user skips, or if we're on desktop -- it resolves and the
+   session begins. Styled to match the boot gate. */
+async function showSignInScreen() {
+  // Desktop (Eel) mode uses its own local Google auth at calendar time,
+  // so there's no web sign-in step -- proceed straight to the session.
+  if (isEelMode()) return;
+
+  // Ask the server about Google status.
+  let status = { configured: false, connected: false };
+  try {
+    const r = await fetch('/api/google_status', { credentials: 'same-origin' });
+    const j = await r.json();
+    if (j && j.ok) status = j.data;
+  } catch (e) { /* treat as not configured */ }
+
+  // If already connected (e.g. returning after the OAuth redirect), skip.
+  if (status.connected) return;
+
+  return new Promise((resolve) => {
+    const screen = document.createElement('div');
+    screen.id = 'signin-gate';
+
+    const googleBtn = status.configured
+      ? `<button id="google-signin" class="signin-btn">
+           <span class="g-icon">G</span> Sign in with Google
+         </button>
+         <div class="signin-note">You'll see Google's "unverified app" notice — that's expected for a personal project. Click <b>Advanced → Continue</b>.</div>`
+      : `<div class="signin-note">Google Calendar isn't configured on this server, so calendar publishing is off. You can still use the full planner and on-screen schedule.</div>`;
+
+    screen.innerHTML = `
+      <div class="gate-inner">
+        <div class="gate-logo-wrap">
+          <img src="assets/chrono-icon.png" alt="Chrono" class="gate-logo">
+          <div class="gate-scan"></div>
+        </div>
+        <div class="gate-title">CHRONO</div>
+        <div class="gate-sub">CONNECT YOUR CALENDAR</div>
+        <div class="signin-actions">
+          ${googleBtn}
+          <button id="skip-signin" class="signin-skip">Continue without calendar →</button>
+        </div>
+      </div>`;
+    document.body.appendChild(screen);
+
+    const done = () => { screen.remove(); resolve(); };
+
+    const g = document.getElementById('google-signin');
+    if (g) {
+      g.addEventListener('click', () => {
+        // Send the browser through the OAuth flow. On return, the page
+        // reloads at "/?google=connected" and this screen won't reappear
+        // (status.connected will be true).
+        window.location.href = '/auth/google/login';
+      });
+    }
+    document.getElementById('skip-signin').addEventListener('click', done);
+  });
+}
 
 /* Start (or restart) the session flow WITHOUT the boot gate. Clears the
    log, cancels any pending input from a previous run, and runs. Used both
    after the initial gate and by the Reload button. */
 function startSession() {
+  // Reveal the terminal now that the gates are gone (kept hidden before
+  // this so it never flashes on first paint).
+  document.body.classList.add('booted');
+
   _sessionId += 1;
   const mySession = _sessionId;
 
@@ -976,13 +1158,23 @@ window.addEventListener('DOMContentLoaded', async () => {
   addLineInstant('chrono', 'dim', 'Connecting to Chrono backend...', 'muted');
   const ready = await waitForEel();
   if (!ready) {
-    addLineInstant('[error]', '', 'Could not reach the Python backend (eel.js not connected).', 'error');
-    addLineInstant(null, null, 'Make sure you launched with "python app.py" (not by opening index.html directly).', 'muted');
+    if (window.__noEel || typeof window.eel === 'undefined') {
+      // Web mode: the HTTP API didn't respond.
+      addLineInstant('[error]', '', 'Could not reach the Chrono server API.', 'error');
+      addLineInstant(null, null, 'The server may still be starting up — wait a moment and refresh.', 'muted');
+    } else {
+      // Desktop mode: eel didn't connect.
+      addLineInstant('[error]', '', 'Could not reach the Python backend (eel not connected).', 'error');
+      addLineInstant(null, null, 'Launch with "python app.py" (don\'t open index.html directly).', 'muted');
+    }
     return;
   }
   logEl().innerHTML = '';
 
-  // Gate on a click so audio is unlocked (once), THEN run the session.
+  // Gate on a click so audio is unlocked (once).
   await showStartGate();
+  // Then the Google sign-in screen (web mode only; skippable).
+  await showSignInScreen();
+  // Then begin the session ("Chrono is Online" -> questions).
   startSession();
-});git 
+});
