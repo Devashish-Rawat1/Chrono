@@ -139,6 +139,33 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
+# Keyword heuristic used ONLY as a last resort, when Groq gave us no usable
+# classification for a task even after retries. Better to make a sensible
+# deep/light guess from obvious keywords than to interrupt the user with a
+# clarifying question for a task whose nature is fairly clear from its name.
+_DEEP_KEYWORDS = (
+    "dsa", "leetcode", "code", "coding", "program", "develop", "build", "study",
+    "revision", "revise", "learn", "research", "paper", "read", "write", "writing",
+    "exam", "test", "prep", "project", "ml", "math", "assignment", "thesis",
+    "design", "debug", "algorithm", "practice",
+)
+_LIGHT_KEYWORDS = (
+    "gym", "workout", "exercise", "run", "walk", "yoga", "chore", "clean",
+    "laundry", "cook", "shop", "email", "call", "meeting", "admin", "errand",
+    "rest", "relax", "break", "meditate", "stretch",
+)
+
+
+def _heuristic_load(task_name: str) -> str | None:
+    """Guesses 'deep' or 'light' from keywords in the task name, or None."""
+    n = task_name.lower()
+    if any(k in n for k in _LIGHT_KEYWORDS):
+        return "light"
+    if any(k in n for k in _DEEP_KEYWORDS):
+        return "deep"
+    return None
+
+
 def analyze_tasks(tasks: list[dict]) -> dict:
     """
     Sends all tasks to Groq in one batched call and merges the
@@ -159,17 +186,34 @@ def analyze_tasks(tasks: list[dict]) -> dict:
 
     user_prompt = _build_user_prompt(tasks)
 
-    try:
-        result = call_llm(SYSTEM_PROMPT, user_prompt, expect_json=True, json_schema=CLASSIFICATION_RESPONSE_SCHEMA)
-        raw_classifications = result.get("classifications", [])
-        print(f"  [Task Analysis] Groq returned {len(raw_classifications)} classification(s) for {len(tasks)} task(s).")
-    except Exception as e:
-        # If the LLM call fails outright (network, auth, bad JSON), fall back
-        # to a safe default rather than crashing the whole pipeline. Every
-        # task gets flagged low-confidence so the user is asked rather than
-        # silently given a wrong classification.
-        print(f"  [Task Analysis] Groq call failed ({e}); falling back to manual review.")
-        raw_classifications = []
+    # Groq on llama-3.3-70b runs in plain json_object mode (no schema
+    # enforcement), so it OCCASIONALLY returns a short classifications
+    # array -- e.g. 1 item for 3 tasks -- which then dumps the unmatched
+    # tasks into "needs clarification" every run. To fix that, we retry up
+    # to 2 extra times if the model returns FEWER classifications than we
+    # sent, adding an explicit reminder of how many are required. The first
+    # attempt is the normal prompt; retries append a count nudge.
+    raw_classifications = []
+    for attempt in range(3):
+        prompt = user_prompt
+        if attempt > 0:
+            prompt = (
+                user_prompt
+                + f"\n\nIMPORTANT: You MUST return exactly {len(tasks)} objects in "
+                f"the \"classifications\" array — one for every task listed above, "
+                f"in the same order. Do not omit any task."
+            )
+        try:
+            result = call_llm(SYSTEM_PROMPT, prompt, expect_json=True, json_schema=CLASSIFICATION_RESPONSE_SCHEMA)
+            raw_classifications = result.get("classifications", [])
+            print(f"  [Task Analysis] Groq returned {len(raw_classifications)} classification(s) for {len(tasks)} task(s) (attempt {attempt + 1}).")
+            if len(raw_classifications) >= len(tasks):
+                break  # got enough; stop retrying
+        except Exception as e:
+            # If the LLM call fails outright (network, auth, bad JSON), fall
+            # back to a safe default rather than crashing the pipeline.
+            print(f"  [Task Analysis] Groq call failed ({e}); attempt {attempt + 1}.")
+            raw_classifications = []
 
     # Primary lookup: normalized name (case/whitespace-insensitive), since
     # the model is asked to copy names exactly but isn't 100% reliable
@@ -192,7 +236,17 @@ def analyze_tasks(tasks: list[dict]) -> dict:
             match = raw_classifications[i]
 
         if match is None:
-            # Genuinely no classification available for this task.
+            # No classification from Groq for this task. Try a keyword
+            # heuristic before interrupting the user -- only ask if even
+            # that can't guess.
+            guess = _heuristic_load(task["name"])
+            if guess:
+                task["cognitive_load"] = guess
+                task.setdefault("urgency", None)
+                if task.get("urgency") is None:
+                    task["urgency"] = "medium"
+                task["analysis_confidence"] = "low"
+                continue
             task["cognitive_load"] = None
             task.setdefault("urgency", None)
             task["analysis_confidence"] = "low"
@@ -218,10 +272,14 @@ def analyze_tasks(tasks: list[dict]) -> dict:
         # app ask about all three tasks unnecessarily. A missing
         # cognitive_load is the real signal that we need to ask.
         if task.get("cognitive_load") not in ("deep", "light"):
-            question = match.get("clarifying_question") or (
-                f"What kind of task is '{task['name']}' — deep focus work or lighter/routine work?"
-            )
-            needs_clarification.append({"name": task["name"], "question": question})
+            guess = _heuristic_load(task["name"])
+            if guess:
+                task["cognitive_load"] = guess
+            else:
+                question = match.get("clarifying_question") or (
+                    f"What kind of task is '{task['name']}' — deep focus work or lighter/routine work?"
+                )
+                needs_clarification.append({"name": task["name"], "question": question})
 
     return {"tasks": tasks, "needs_clarification": needs_clarification}
 
