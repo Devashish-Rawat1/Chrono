@@ -191,7 +191,7 @@ body.booted #term-root { visibility: visible; }
 
 .msg { color: var(--chrono-green); opacity: 0.92; }
 .msg.muted { color: var(--text-muted); }
-.msg.success { color: var(--chrono-green); }
+.msg.success { color: var(--chrono-green); opacity: 1; text-shadow: 0 0 5px rgba(2,232,60,0.3); }
 .msg.error { color: #ff5b4d; opacity: 1; }
 .msg.prose { display: block; opacity: 0.95; }
 .msg.user { color: #8cffaa; }
@@ -222,6 +222,13 @@ body.booted #term-root { visibility: visible; }
 }
 .prompt { color: var(--chrono-green); opacity: 0.7; flex-shrink: 0; }
 
+#cmd-wrap {
+  position: relative;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
 #cmd {
   flex: 1;
   background: transparent;
@@ -230,9 +237,29 @@ body.booted #term-root { visibility: visible; }
   color: var(--chrono-green);
   font-family: inherit;
   font-size: 13px;
-  caret-color: var(--chrono-green);
+  caret-color: transparent;   /* hide the thin native caret; we draw a
+                                 thicker block caret (#cmd-caret) instead */
 }
 #cmd:disabled { opacity: 0.4; }
+
+/* Thick block caret that sits just after the typed text. It follows the
+   text because the font is monospace and app.js positions it by character
+   count. Blinks like a classic terminal cursor. */
+#cmd-caret {
+  position: absolute;
+  left: 0;
+  width: 8px;                 /* the "little thicker" part */
+  height: 16px;
+  background: var(--chrono-green);
+  box-shadow: 0 0 6px rgba(2,232,60,0.6);
+  pointer-events: none;
+  animation: caretblink 1.1s steps(1) infinite;
+}
+#cmd:disabled ~ #cmd-caret { display: none; }
+@keyframes caretblink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
 
 #log::-webkit-scrollbar { width: 6px; }
 #log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
