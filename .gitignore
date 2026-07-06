@@ -10,3 +10,9 @@ __pycache__/
 
 output/
 .DS_Store
+
+docs/Testing.txt
+docs/test_cases.txt
+
+test/
+templates/
