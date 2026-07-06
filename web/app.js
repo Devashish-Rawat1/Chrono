@@ -25,7 +25,7 @@ const FACES = [
    ===================   `,
     `   ===================   
   =| --------------- |=  
- | | *************** | | 
+ | |  *************  | | 
   =| --------------- |=  
    ===================   `
 ];
@@ -579,8 +579,50 @@ cmdEl().addEventListener('keydown', (e) => {
     const r = _inputResolver;
     _inputResolver = null;
     r(val);
+    _positionCaret();
   }
 });
+
+/* ---- thick block caret positioning ----
+   The native caret is hidden (caret-color: transparent) and replaced with
+   a thicker blinking block (#cmd-caret). Because the terminal font is
+   monospace, we can place the block by multiplying the caret's character
+   index by the width of a single character, which we measure once from a
+   hidden mirror span. Updated on every input/selection change. */
+let _charWidth = null;
+
+function _measureCharWidth() {
+  const input = cmdEl();
+  const probe = document.createElement('span');
+  const cs = getComputedStyle(input);
+  probe.style.cssText =
+    `position:absolute;visibility:hidden;white-space:pre;` +
+    `font-family:${cs.fontFamily};font-size:${cs.fontSize};` +
+    `letter-spacing:${cs.letterSpacing};`;
+  probe.textContent = '0000000000';           // 10 chars for a stable avg
+  document.body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width / 10;
+  probe.remove();
+  return w || 7.8;                              // fallback if measurement fails
+}
+
+function _positionCaret() {
+  const caret = document.getElementById('cmd-caret');
+  const input = cmdEl();
+  if (!caret || !input) return;
+  if (_charWidth === null) _charWidth = _measureCharWidth();
+  // Caret index (end of selection). Fall back to text length.
+  const idx = (input.selectionStart != null) ? input.selectionStart : input.value.length;
+  const x = idx * _charWidth - input.scrollLeft;
+  caret.style.left = Math.max(0, x) + 'px';
+}
+
+['input', 'keyup', 'click', 'focus', 'select'].forEach(evt => {
+  cmdEl().addEventListener(evt, _positionCaret);
+});
+window.addEventListener('resize', () => { _charWidth = null; _positionCaret(); });
+// Position it once at startup.
+_positionCaret();
 
 /* A pending ask()'s rejecter, so startSession() can cancel a question the
    previous run was waiting on. */
@@ -620,6 +662,46 @@ async function askMultiline() {
     lines.push(v);
   }
   return lines.join('\n');
+}
+
+/* Collect a single-line answer that must pass a validator before we move
+   on. If the input is invalid, we show a short "fix it" hint and re-ask
+   the SAME question -- we do NOT advance. A blank answer is allowed
+   through (the user can skip by pressing Enter, per the app's design), so
+   the validator is only applied to non-blank input. `validate` returns
+   null if OK, or an error string to show. */
+async function askValidated(validate) {
+  while (true) {
+    const v = await ask();
+    if (v.trim() === '') return v;            // blank = skip, allowed
+    const err = validate(v);
+    if (!err) return v;                        // valid -> proceed
+    await typeLine('[!]', '', err, 'error', { speed: 4 });
+    say('error');
+    // loop back and ask the same question again
+  }
+}
+
+/* Client-side check for the wake/sleep window, mirroring the Python
+   regex in onboarding.parse_wake_sleep. Accepts casual forms like
+   "7 am - 11 pm", "7am-11pm", "9 to 5", "7:00 AM - 11:00 PM". Requires
+   BOTH a start and end time (a single "7 am" is not a valid window). */
+function _validateWakeSleep(v) {
+  const re = /(\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?)\s*(?:[-–]|to)\s*(\d{1,2}(?::\d{2})?\s*(?:[AaPp][Mm])?)/;
+  if (!re.test(v)) {
+    return 'Please enter BOTH a wake and sleep time as a range, e.g. "7:00 AM - 11:00 PM" (also fine: "7 am - 11 pm").';
+  }
+  return null;
+}
+
+/* Client-side check for the focus-span question: must be a positive
+   number (hours). Casual "2", "2.5", "2 hours" all accepted. */
+function _validateFocus(v) {
+  const m = v.match(/\d+(?:\.\d+)?/);
+  if (!m || parseFloat(m[0]) <= 0) {
+    return 'Please enter a number of hours, e.g. "2" or "1.5".';
+  }
+  return null;
 }
 
 /* ---- backend bridge helper ---- */
@@ -726,27 +808,28 @@ async function runSession(sessionId) {
 
   await typeLine('chrono', 'dim', 'Chrono — An Autonomous Planning Agent', 'muted');
   await typeLine('chrono', 'dim', `Let's set up your week.`, 'muted');
+  await typeLine(null, null, 'Tip: follow the format shown in each example. Casual is fine (e.g. "7 am - 11 pm"). Press Enter to skip a question.', 'muted', { speed: 3 });
   addRule();
 
   // ---- Onboarding questions ----
-  await typeLine('[Q]', '', 'What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)', 'muted');
-  const wake_sleep = await ask();
+  await typeLine('[Q]', '', 'What time do you usually wake up and go to sleep?  (e.g. 7:00 AM - 11:00 PM)', 'success');
+  const wake_sleep = await askValidated(_validateWakeSleep);
 
-  await typeLine('[Q]', '', 'What are your meal times? One per line, blank line when done.', 'muted');
+  await typeLine('[Q]', '', 'What are your meal times? One per line, blank line when done.', 'success');
   await typeLine(null, null, '    e.g. Breakfast (8:00 AM - 9:00 AM)', 'muted', { speed: 4 });
   await typeLine(null, null, '         Lunch (1:00 PM - 2:00 PM)', 'muted', { speed: 4 });
   await typeLine(null, null, '         Dinner (9:00 PM - 10:00 PM)', 'muted', { speed: 4 });
   await typeLine(null, null, '    (list as many as you like — 2, 3, 4… or leave blank for defaults)', 'muted', { speed: 3 });
   const meals = await askMultiline();
 
-  await typeLine('[Q]', '', 'Any fixed weekly commitments? One per line, blank line when done.', 'muted');
+  await typeLine('[Q]', '', 'Any fixed weekly commitments? One per line, blank line when done.', 'success');
   await typeLine(null, null, '    e.g. Gym: Mon/Wed/Fri 4 PM - 5 PM', 'muted', { speed: 4 });
   const recurring = await askMultiline();
 
-  await typeLine('[Q]', '', 'How many hours can you focus continuously before a break?  (e.g. 2)', 'muted');
-  const focus = await ask();
+  await typeLine('[Q]', '', 'How many hours can you focus continuously before a break?  (e.g. 2)', 'success');
+  const focus = await askValidated(_validateFocus);
 
-  await typeLine('[Q]', '', 'What tasks/goals to schedule this week? One per line, blank line when done.', 'muted');
+  await typeLine('[Q]', '', 'What tasks/goals to schedule this week? One per line, blank line when done.', 'success');
   await typeLine(null, null, '    e.g. DSA Practice (2 hrs/day)   |   Build Chrono (10 hrs/week)', 'muted', { speed: 4 });
   const tasks = await askMultiline();
 
@@ -780,7 +863,7 @@ async function runSession(sessionId) {
   }
 
   const win = onb.window || {};
-  await typeLine('[1/5]', '', `Onboarding done — ${onb.tasks.length} task(s), window ${win.wake} to ${win.sleep}.`, 'success');
+  await typeLine('[1/5]', '', `Onboarding done — ${onb.tasks.length} task(s), window ${win.wake} to ${win.sleep}.`, 'muted');
 
   // ---- Stage 2: task analysis (+ clarifications) ----
   startThinking();
@@ -789,7 +872,7 @@ async function runSession(sessionId) {
   let analysis = await call('api_analyze_tasks');
   stopAnalyzing();
   stopThinking();
-  await typeLine('[2/5]', '', `Groq classified ${analysis.count} task(s).`, 'success');
+  await typeLine('[2/5]', '', `Groq classified ${analysis.count} task(s).`, 'muted');
 
   if (analysis.needs_clarification && analysis.needs_clarification.length) {
     await typeLine('[?]', '', 'A couple of tasks need clarification:', 'muted');
@@ -827,13 +910,13 @@ async function runSession(sessionId) {
     await typeLine('[3/5]', '', 'Scheduling failed: ' + (sched.validation_problems[0] || 'unknown'), 'error');
     return;
   }
-  await typeLine('[3/5]', '', 'Schedule placed and validated.', 'success');
+  await typeLine('[3/5]', '', 'Schedule placed and validated.', 'muted');
   say('scheduleReady');
 
   // ---- Print the schedule grouped by day, with a Copy chip ----
   const scheduleText = formatSchedule(sched.blocks);
   addRule();
-  await typeBlock(scheduleText, 'muted', { instant: true });
+  await typeBlock(scheduleText, 'success', { instant: true });
   addCopyChip(scheduleText);
   addRule();
 
@@ -842,12 +925,12 @@ async function runSession(sessionId) {
   await typeLine('[4/5]', '', 'Explanation — summarizing your week...', 'muted');
   const exp = await call('api_explain_schedule');
   stopThinking();
-  await typeLine('[4/5]', '', 'Here\'s your week:', 'success');
+  await typeLine('[4/5]', '', 'Here\'s your week:', 'muted');
   if (exp.summary) await typeBlock('\n' + exp.summary + '\n', 'prose', { speed: 6 });
 
   // ---- Stage 5: calendar + planner (each gated on a y/n) ----
   addRule();
-  await typeLine('[5/5]', '', 'Publish this schedule to your Google Calendar? (y/n)', 'muted');
+  await typeLine('[5/5]', '', 'Publish this schedule to your Google Calendar? (y/n)', 'success');
   const wantCal = (await ask()).trim().toLowerCase();
   if (wantCal === 'y' || wantCal === 'yes') {
     cmdEl().disabled = true;
@@ -880,7 +963,7 @@ async function runSession(sessionId) {
     await typeLine('[cal]', '', 'Skipped — nothing written to your calendar.', 'muted');
   }
 
-  await typeLine('[5/5]', '', 'Generate a downloadable Excel planner? (y/n)', 'muted');
+  await typeLine('[5/5]', '', 'Generate a downloadable Excel planner? (y/n)', 'success');
   const wantXls = (await ask()).trim().toLowerCase();
   if (wantXls === 'y' || wantXls === 'yes') {
     cmdEl().disabled = true;
