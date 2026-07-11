@@ -90,6 +90,72 @@ body.booted #term-root { visibility: visible; }
 }
 #social-icons a:hover { opacity: 1; }
 
+/* Voice Commands panel — top-left, mirroring #social-icons on the right.
+   The toggle expands an in-page card listing each command and its action;
+   no navigation, just show/hide. */
+#voice-panel {
+  position: fixed;
+  top: 20px;
+  left: 24px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+#voice-panel-toggle {
+  background: #000000;
+  opacity: 0.9;
+}
+#voice-panel-body {
+  background: #000000;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  width: 320px;
+  max-width: 78vw;
+  box-shadow: 0 0 0 1px rgba(2,232,60,0.05), 0 12px 40px rgba(0,0,0,0.6);
+  animation: gatefadein 0.25s ease;
+}
+.vp-title {
+  color: var(--chrono-green);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+  text-shadow: 0 0 6px rgba(2,232,60,0.35);
+}
+.vp-hint {
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.vp-hint b { color: var(--chrono-green); }
+.vp-cmd {
+  border-top: 1px dashed var(--border);
+  padding: 8px 0 6px;
+}
+.vp-cmd:first-child { border-top: none; }
+.vp-say {
+  color: var(--chrono-green);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  font-weight: bold;
+}
+.vp-say::before {
+  content: "> ";        /* plain terminal-style marker, no emoji */
+}
+.vp-act {
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
 .ctl {
   background: transparent;
   border: 1px solid var(--border);
@@ -118,6 +184,42 @@ body.booted #term-root { visibility: visible; }
   letter-spacing: 0.5px;
   animation: flicker 4s infinite;
   pointer-events: none;
+}
+
+/* Voice-command mic button, sitting just left of the Drazan badge. */
+#mic-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 92px;              /* clears the Drazan badge to its right */
+  z-index: 3;
+  background: #000000;
+  border: 1px solid var(--border);
+  color: var(--chrono-green);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-weight: bold;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s, background 0.15s, box-shadow 0.15s;
+}
+#mic-btn:hover {
+  opacity: 1;
+  border-color: var(--chrono-green);
+  background: rgba(2,232,60,0.08);
+}
+/* Pulsing red state while actively listening. */
+#mic-btn.listening {
+  color: #ff5b4d;
+  border-color: #ff5b4d;
+  box-shadow: 0 0 10px rgba(255,91,77,0.5);
+  animation: micpulse 1s ease-in-out infinite;
+}
+@keyframes micpulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(255,91,77,0.4); }
+  50% { box-shadow: 0 0 16px rgba(255,91,77,0.8); }
 }
 
 @keyframes flicker {
@@ -570,6 +672,10 @@ body.booted #term-root { visibility: visible; }
   .signin-skip { font-size: 13px; }
 
   #reload-btn { font-size: 9px; padding: 3px 6px; }
+  #mic-btn { font-size: 9px; padding: 3px 6px; right: 78px; }
+  #voice-panel { top: 8px; left: 8px; }
+  #voice-panel-toggle { font-size: 9px; padding: 3px 6px; }
+  #voice-panel-body { width: 80vw; max-width: 80vw; padding: 10px 12px; }
   #credit-badge { font-size: 12px; }
 }
 
