@@ -13,6 +13,15 @@
 
 <canvas id="matrix-rain"></canvas>
 
+<div id="voice-panel">
+  <button id="voice-panel-toggle" class="ctl" title="Show the list of voice commands">VOICE COMMANDS ▸</button>
+  <div id="voice-panel-body" hidden>
+    <div class="vp-title">VOICE COMMANDS</div>
+    <div class="vp-hint">Click <b>VOICE</b> (bottom-right), then say:</div>
+    <div id="voice-panel-list"><!-- populated by app.js from the command registry --></div>
+  </div>
+</div>
+
 <div id="social-icons">
   <button id="sound-toggle" class="ctl" title="Mute or unmute Chrono's voice">CHRONO: SPEAKING</button>
   <a href="https://github.com/Devashish-Rawat1" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
@@ -40,6 +49,7 @@
     <span class="prompt">chrono&gt;</span>
     <span id="cmd-wrap"><input id="cmd" type="text" autocomplete="off" spellcheck="false" autofocus /><span id="cmd-caret"></span></span>
   </div>
+  <button id="mic-btn" title="Click and speak a command (e.g. &quot;Reload&quot;)">VOICE</button>
   <div id="credit-badge">Drazan</div>
 </div>
 
