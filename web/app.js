@@ -236,6 +236,7 @@ const VOICE = {
   mute:          'assets/mute.mp3',
   unmute:        'assets/unmute.mp3',
   reloaded:      'assets/reloaded.mp3',                  // Reload button
+  okReloading:   'assets/ok-sir-reloading.mp3',          // voice command: "reload"
   // Hover easter eggs.
   master:        'assets/he-is-my-master.mp3',          // hover the Drazan badge
   mastersProfile:'assets/thats-my-masters-profile.mp3', // hover GitHub / LinkedIn
@@ -305,18 +306,35 @@ function typingSoundStop() {
    is playing (they represent Chrono "speaking" out loud), and stop when
    the clip ends or is cut off. */
 let _currentVoice = null;
+/* ONE reused <audio> element for all voice clips. Creating a fresh
+   `new Audio()` on every cue (which the code used to do) leaks decoder
+   pipelines: after a handful of plays the browser starts clipping or
+   dropping audio (the "works 4-5 times then cuts out" bug). Reusing a
+   single element and just swapping its `src` keeps playback reliable
+   indefinitely -- the same pattern the typing sound already uses. */
+let _voiceEl = null;
+
+function _ensureVoiceEl() {
+  if (!_voiceEl) {
+    _voiceEl = new Audio();
+    _voiceEl.preload = 'auto';
+  }
+  return _voiceEl;
+}
 
 function _vizOn() { if (window.vizStart) window.vizStart(); }
 function _vizOff() { if (window.vizStop) window.vizStop(); }
 
 /* Attach the visualizer to an audio element: on while it plays, off when
-   it ends/pauses. */
+   it ends/pauses. Bound once per element (guarded) so reusing the same
+   element doesn't stack duplicate listeners. */
 function _bindViz(audio) {
   if (!audio) return;
   _vizOn();
-  const off = () => _vizOff();
-  audio.addEventListener('ended', off);
-  audio.addEventListener('pause', off);
+  if (audio._vizBound) return;
+  audio._vizBound = true;
+  audio.addEventListener('ended', _vizOff);
+  audio.addEventListener('pause', _vizOff);
 }
 
 function _waitForTypingIdle(timeoutMs = 6000) {
@@ -330,7 +348,8 @@ function _waitForTypingIdle(timeoutMs = 6000) {
 }
 
 /* Play a voice clip once typing has stopped. Returns a Promise that
-   resolves with the Audio element (or null if muted/unavailable). */
+   resolves with the Audio element (or null if muted/unavailable). Reuses
+   the single _voiceEl element (see note above). */
 async function say(key) {
   if (voiceMuted) return null;
   const src = VOICE[key];
@@ -338,8 +357,13 @@ async function say(key) {
   await _waitForTypingIdle();
   if (voiceMuted) return null;  // may have been muted while waiting
   try {
-    if (_currentVoice) { try { _currentVoice.pause(); } catch (e) {} }
-    const a = new Audio(src);
+    const a = _ensureVoiceEl();
+    a._priming = false;               // supersede any pending mic primer
+    a.muted = false;
+    try { a.pause(); } catch (e) {}   // cut off any still-playing cue
+    a.onended = null;                  // drop any prior speakThen callback
+    a.currentTime = 0;
+    a.src = src;
     _logAudioErrors(a, src);
     a.volume = 0.9;
     _currentVoice = a;
@@ -452,8 +476,11 @@ function stopAllVoice() {
     // mute like any other voice.
     if (!voiceMuted) {
       try {
-        if (_currentVoice) { try { _currentVoice.pause(); } catch (e) {} }
-        const a = new Audio(VOICE.reloaded);
+        const a = _ensureVoiceEl();
+        try { a.pause(); } catch (e) {}
+        a.onended = null;
+        a.currentTime = 0;
+        a.src = VOICE.reloaded;
         a.volume = 0.9;
         _currentVoice = a;
         a.play().catch(() => {});
@@ -462,6 +489,239 @@ function stopAllVoice() {
     }
   });
 })();
+
+/* Shared list of voice commands for the info panel (what the user says +
+   what it does). The executable registry lives in initVoiceCommands and
+   references these same entries so the displayed list can't drift from the
+   real behaviour. */
+const VOICE_COMMAND_INFO = [
+  { say: '"Reload"', action: 'Chrono says "Ok sir, reloading" and restarts the planning session.' },
+  // When you add a real command below, add its {say, action} here too.
+];
+
+/* ---- Voice Commands panel (top-left) show/hide ----
+   Independent of whether SpeechRecognition is available, so users can always
+   read what commands exist. */
+(function initVoicePanel() {
+  const toggle = document.getElementById('voice-panel-toggle');
+  const bodyEl = document.getElementById('voice-panel-body');
+  const list = document.getElementById('voice-panel-list');
+  if (!toggle || !bodyEl) return;
+
+  if (list) {
+    list.innerHTML = '';
+    VOICE_COMMAND_INFO.forEach(c => {
+      const wrap = document.createElement('div');
+      wrap.className = 'vp-cmd';
+      const say = document.createElement('div');
+      say.className = 'vp-say';
+      say.textContent = c.say;
+      const act = document.createElement('div');
+      act.className = 'vp-act';
+      act.textContent = c.action;
+      wrap.appendChild(say);
+      wrap.appendChild(act);
+      list.appendChild(wrap);
+    });
+  }
+
+  toggle.addEventListener('click', () => {
+    const opening = bodyEl.hasAttribute('hidden');
+    if (opening) {
+      bodyEl.removeAttribute('hidden');
+      toggle.textContent = 'VOICE COMMANDS ▾';
+    } else {
+      bodyEl.setAttribute('hidden', '');
+      toggle.textContent = 'VOICE COMMANDS ▸';
+    }
+  });
+})();
+
+/* ---- voice commands (push-to-talk) ----
+   Click the mic, speak one command, Chrono acts. Uses the browser's built-in
+   Web Speech API (SpeechRecognition) -- no model, no server. Best supported
+   in Chrome (and the hosted HTTPS site); if the API is missing (some Eel /
+   Firefox / Safari builds) the button reports "not supported" and nothing
+   else is affected.
+
+   Command registry: map spoken keywords -> an action. Matching is loose (we
+   check whether the transcript CONTAINS a keyword) so "reload" / "reload it"
+   / "reloading" all trigger. Add more commands by extending VOICE_COMMANDS. */
+(function initVoiceCommands() {
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    // API unavailable (e.g. some desktop Eel builds). Leave the button but
+    // make clear it won't listen here; everything else keeps working.
+    btn.addEventListener('click', () => {
+      addLineInstant('[voice]', 'dim', 'Voice input is not supported in this browser. Try the hosted site in Chrome.', 'muted');
+    });
+    btn.style.opacity = '0.5';
+    btn.title = 'Voice not supported here — use Chrome / the hosted site';
+    return;
+  }
+
+  // Play a voice clip immediately (bypassing say()'s typing-idle wait), then
+  // run `after` when it finishes. Respects mute. Used so "Ok sir, reloading"
+  // is heard before the reload actually fires.
+  function speakThen(key, after) {
+    if (voiceMuted) { after(); return; }
+    try {
+      const a = _ensureVoiceEl();
+      a._priming = false;          // real playback supersedes any primer
+      a.muted = false;
+      try { a.pause(); } catch (e) {}
+      a.onended = null;
+      a.currentTime = 0;
+      a.src = VOICE[key];
+      a.volume = 0.9;
+      _currentVoice = a;
+      _bindViz(a);
+      let done = false;
+      let retried = false;
+      const go = () => { if (!done) { done = true; after(); } };
+      a.onended = go;
+      setTimeout(go, 6000);        // hard fallback if 'ended' never fires
+
+      const retryOnce = () => {
+        if (retried || done) return go();
+        retried = true;
+        try { a.pause(); a.currentTime = 0; } catch (e) {}
+        setTimeout(() => { if (!done) a.play().catch(() => go()); }, 900);
+      };
+
+      a.play().then(() => {
+        // Watchdog: on a Bluetooth headset the output can be mid profile
+        // switch (mic HFP -> media A2DP); the element then "plays" while
+        // producing nothing and barely advancing. If currentTime hasn't
+        // moved after 700ms, restart the clip once after a further wait.
+        setTimeout(() => {
+          if (!done && !retried && a.currentTime < 0.1) {
+            console.warn('[voice] clip stalled (output device switching?); retrying once');
+            retryOnce();
+          }
+        }, 700);
+      }).catch((err) => {
+        // Surface WHY playback failed (NotAllowedError = autoplay/gesture,
+        // AbortError = something paused it, NotSupportedError = bad src).
+        console.error('[voice] confirmation clip failed to play:', err && err.name, err && err.message);
+        retryOnce();
+      });
+    } catch (e) { after(); }
+  }
+
+  // The command table. Each entry: what the user SAYS, the trigger
+  // keywords, and the action. Keep VOICE_COMMAND_INFO (used by the panel)
+  // in sync when you add entries here.
+  const VOICE_COMMANDS = [
+    {
+      keywords: ['reload', 'restart', 'reset'],
+      run: () => speakThen('okReloading', () => startSession()),
+    },
+    // Add more here later, e.g.:
+    // { keywords: ['mute'], run: () => document.getElementById('sound-toggle').click() },
+  ];
+
+  let listening = false;
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.maxAlternatives = 3;
+  rec.continuous = false;   // push-to-talk: one utterance per click
+
+  function setListening(on) {
+    listening = on;
+    btn.classList.toggle('listening', on);
+    btn.textContent = on ? 'LISTENING…' : 'VOICE';
+  }
+
+  function handleTranscript(text) {
+    const t = (text || '').toLowerCase().trim();
+    if (!t) return;
+    addLineInstant('[voice]', 'dim', `heard: "${t}"`, 'muted');
+    for (const cmd of VOICE_COMMANDS) {
+      if (cmd.keywords.some(k => t.includes(k))) {
+        cmd.run();
+        return;
+      }
+    }
+    addLineInstant('[voice]', 'dim', 'No matching command. Try saying "Reload".', 'muted');
+  }
+
+  let _pendingTranscript = '';
+
+  rec.addEventListener('result', (e) => {
+    // Scan all alternatives for a known keyword, best match wins.
+    let picked = '';
+    for (let i = 0; i < e.results.length; i++) {
+      for (let j = 0; j < e.results[i].length; j++) {
+        const alt = e.results[i][j].transcript;
+        if (!picked) picked = alt;
+        const low = alt.toLowerCase();
+        if (VOICE_COMMANDS.some(c => c.keywords.some(k => low.includes(k)))) {
+          picked = alt;
+        }
+      }
+    }
+    // Do NOT run the command here. While recognition is active the
+    // microphone session is live, and on Windows Chrome that registers as
+    // a "communication" audio session -- Windows ducks or mutes all other
+    // page audio, so a clip played NOW is silent even though play()
+    // succeeds (the "action runs but no voice" bug). Stash the transcript,
+    // stop recognition, and act in the 'end' handler once the mic is
+    // released.
+    _pendingTranscript = picked;
+    try { rec.stop(); } catch (err) {}
+  });
+  rec.addEventListener('end', () => {
+    setListening(false);
+    if (_pendingTranscript) {
+      const t = _pendingTranscript;
+      _pendingTranscript = '';
+      // Settle delay before acting: the OS must release the mic session
+      // (Windows un-ducks "communication" audio) and, on Bluetooth
+      // headsets, switch back from the HFP mic profile to the A2DP media
+      // profile -- that switch alone takes ~1-2s, during which media
+      // playback is silent. 300ms proved too short in testing; 1200ms
+      // covers ducking release and most BT profile switches.
+      setTimeout(() => handleTranscript(t), 1200);
+    }
+  });
+  rec.addEventListener('error', (e) => {
+    setListening(false);
+    const msg = e.error === 'not-allowed'
+      ? 'Microphone permission denied. Allow mic access to use voice.'
+      : `Voice error: ${e.error}.`;
+    addLineInstant('[voice]', 'dim', msg, 'muted');
+  });
+
+  btn.addEventListener('click', () => {
+    if (listening) { try { rec.stop(); } catch (e) {} return; }
+    try {
+      // Prime the voice element INSIDE this click (a real user gesture):
+      // preload the confirmation clip and do a muted play/pause so the
+      // element has an activation record. Removes any autoplay-policy
+      // doubt for the later non-gesture playback after recognition ends.
+      try {
+        const a = _ensureVoiceEl();
+        a._priming = true;
+        a.src = VOICE.okReloading;
+        a.muted = true;
+        a.play().then(() => {
+          if (a._priming) { a.pause(); a.currentTime = 0; }
+          a.muted = false; a._priming = false;
+        }).catch(() => { a.muted = false; a._priming = false; });
+      } catch (e) {}
+      setListening(true);
+      rec.start();   // browser prompts for mic permission the first time
+    } catch (e) {
+      setListening(false);
+    }
+  });
+})();
+
 
 /* ---- hover easter eggs ----
    Hovering the "Drazan" badge -> Chrono says "He is my master."
@@ -489,7 +749,12 @@ function stopAllVoice() {
   const badge = document.getElementById('credit-badge');
   if (badge) {
     badge.style.pointerEvents = 'auto';  // badge is normally non-interactive
+    badge.style.cursor = 'pointer';
     badge.addEventListener('mouseenter', () => hoverSay('master'));
+    // Clicking the Drazan badge opens the creator's Instagram in a new tab.
+    badge.addEventListener('click', () => {
+      window.open('https://www.instagram.com/devashish__rawat', '_blank', 'noopener,noreferrer');
+    });
   }
 
   // Both social links share the "master's profile" clip.
