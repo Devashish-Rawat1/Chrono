@@ -1,0 +1,9 @@
+Future Ideas:
+
+1. GitHub suggestions for Chrono Code -> status check and undo last commit
+
+2. Build the memory(SQLite gives you: zero setup) and agentic pieces first on Groq — they're the actual "more JARVIS-like" win — and revisit local inference only if API costs or limits become a real problem once you have users.
+
+3. Photo/Video/Screen-recording mode
+
+4. Global hotkey instead of Ctrl -> Right Alt
