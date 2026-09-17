@@ -4,6 +4,7 @@ config/token.json
 config/user_config.json
 
 config/.env
+config/memory.db
 
 __pycache__/
 *.pyc
