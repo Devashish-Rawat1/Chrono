@@ -111,6 +111,41 @@ async def _read_json(request: Request) -> dict:
 
 # ── API endpoints (1:1 with the Eel bridge) ─────────────────────────
 
+_CHAT_HITS: dict[str, list] = {}
+_CHAT_LIMIT, _CHAT_WINDOW = 12, 60.0     # requests per visitor per minute
+
+
+@app.post("/api/chat")
+async def api_chat(request: Request):
+    """Home-screen chat. Rate-limited: it spends Groq + Azure quota on a public server."""
+    import time
+    body = await _read_json(request)
+    key = request.cookies.get(_COOKIE) or (request.client.host if request.client else "anon")
+    now = time.time()
+    hits = [t for t in _CHAT_HITS.get(key, []) if now - t < _CHAT_WINDOW]
+    if len(hits) >= _CHAT_LIMIT:
+        _CHAT_HITS[key] = hits
+        return JSONResponse(_err("Too many messages, sir. Give me a moment."), status_code=429)
+    hits.append(now)
+    _CHAT_HITS[key] = hits
+    try:
+        from chat_agent import chat_with_audio
+        from fastapi.concurrency import run_in_threadpool
+        return _ok(await run_in_threadpool(chat_with_audio, str(body.get("text", "")), body.get("history")))
+    except Exception as e:
+        return JSONResponse(_err(str(e)))
+
+
+@app.get("/api/home_status")
+def api_home_status():
+    """Home screen data. Hosted build: machine-independent fields only."""
+    try:
+        from home_status import get_status
+        return _ok(get_status(desktop=False))
+    except Exception as e:
+        return JSONResponse(_err(str(e)))
+
+
 @app.get("/api/backend_name")
 def api_backend_name():
     try:
@@ -381,6 +416,17 @@ def api_download_planner(request: Request):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="Chrono-Weekly-Planner.xlsx",
     )
+
+
+@app.get("/api/tts")
+def api_tts(key: str = ""):
+    """Azure-synthesized mp3 for a voice cue key. 404 -> frontend uses its mp3."""
+    from tts import synthesize
+    path = synthesize(key)
+    if not path:
+        return Response(status_code=404)
+    return FileResponse(path, media_type="audio/mpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ── Static frontend (served last so /api/* wins) ─────────────────────
